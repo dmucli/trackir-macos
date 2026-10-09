@@ -131,10 +131,13 @@ last 4 bytes = big-endian (n - 8)
   x   = b0<<2 | b1>>6                     (10 bits)
   y   = (b1&0x3F)<<3 | b2>>5              (9 bits)
   len = (b2&0x1F)<<5 | b3>>3              (10 bits)   → run covers x .. x+len-1 on row y
-  sum = (((b3&7)<<8 | b4)<<8 | b5)<<1 | b6>>7   (19 bits, intensity sum of the run)
-  aux = (b6<<8 | b7) & 0x7FFF
+  m1  = (((b3&7)<<8 | b4)<<8 | b5)<<1 | b6>>7   (19 bits, segment +8:   sum of i*I, i counted from x)
+  m0  = (b6<<8 | b7) & 0x7FFF                   (15 bits, segment +0xC: sum of I, the run's intensity)
   ```
-  Records with y == 0 or x+len > width are dropped.
+  Records with y == 0 or x+len > width are dropped. The blob centre (`FUN_00588600`, which accumulates 64-bit
+  sums at object +0x18/+0x20/+0x28) is sub-pixel:
+  `x = sum(m1 + x*m0) / sum(m0)`, `y = sum(y*m0) / sum(m0)`. **[verified on hardware]** one-pixel runs carry m1 = 0;
+  m0 grows linearly with the run length (~140 per pixel) and m1 roughly quadratically.
 * **Type 0** (`ParseFrameType0Segments` @ `005a40d0`): 4-byte records, half-pixel x:
   `f=b3; y = b0 + ((f&0x20) + (f&4)*8)*8;  x0 = (b1 | (f&0x80)<<1 | (f&0x10)<<5 | (f&2)<<9)/2;
    x1 = (b2 | (f&0x40)<<2 | (f&8)<<6 | (f&1)<<10)/2`.

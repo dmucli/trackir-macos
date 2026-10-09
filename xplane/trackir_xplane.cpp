@@ -141,13 +141,12 @@ struct State {
     bool enabled = true;
     bool paused = false;
     double frozen[HeadAxes] = {};
-    // While applied: X-Plane's own head position (`base`, which follows keyboard/mouse view changes) and what we
-    // added to it and wrote last frame.
+    // While applied: X-Plane's head position when tracking took over (`base`); every frame writes base + pose.
+    // The values are never read back: X-Plane nudges them between frames (head-motion effects), and folding those
+    // nudges into the base made the view drift.
     bool applied = false;
     int appliedView = 0;
     double base[HeadAxes] = {};
-    double offset[HeadAxes] = {};
-    float written[HeadAxes] = {};
     std::string status;
 } g;
 
@@ -169,7 +168,7 @@ void refreshMenu()
     XPLMCheckMenuItem(g.menu, g.menuPause, g.paused ? xplm_Menu_Checked : xplm_Menu_Unchecked);
 }
 
-// Puts the head back where X-Plane (and the user's own view moves) left it.
+// Puts the head back where it was when tracking took over.
 void release(bool write)
 {
     if (g.applied && write)
@@ -181,15 +180,9 @@ void release(bool write)
 void apply(const double target[HeadAxes], int view)
 {
     for (int i = 0; i < HeadAxes; i++) {
-        float now = XPLMGetDataf(g.head[i]);
-        if (!g.applied) {
-            g.base[i] = now;
-        } else if (std::fabs(double(now) - double(g.written[i])) > 1e-5) {
-            g.base[i] += double(now) - double(g.written[i]);  // the user moved the view; keep that move
-        }
-        g.offset[i] = target[i];
-        g.written[i] = float(g.base[i] + target[i]);
-        XPLMSetDataf(g.head[i], g.written[i]);
+        if (!g.applied)
+            g.base[i] = XPLMGetDataf(g.head[i]);
+        XPLMSetDataf(g.head[i], float(g.base[i] + target[i]));
     }
     g.applied = true;
     g.appliedView = view;

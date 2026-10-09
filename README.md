@@ -103,6 +103,9 @@ TrackIR-compatible `.xml`.
 
 **Clip type**: with a TrackClip PRO, choose it in Settings › Camera and switch the camera's IR lights off.
 
+**If the view shakes while you hold still**, raise *Smoothing* in Settings › Camera (try 0.5). The filter adapts:
+it smooths heavily when you are still and lightly when you move, so quick glances stay responsive.
+
 **If tracking is jumpy**, open the Live View. It should show exactly three green dots. Extra grey dots are
 reflections or other infrared sources (sunlight, glasses, shiny surfaces). Remove them, or raise the marker
 threshold in Settings › Camera.
@@ -118,7 +121,9 @@ Notes:
 
 - The same actions are X-Plane commands, `trackir_macos/toggle`, `trackir_macos/pause` and
   `trackir_macos/recenter`. Bind them to keys or joystick buttons in X-Plane's settings.
-- Tracking is added on top of X-Plane's own head position, so keyboard and mouse view moves still work.
+- Tracking starts from wherever X-Plane's head is when it takes over. While it is on, it controls the view, so
+  keyboard and mouse view moves are overridden. To adjust your seat position, switch *Head tracking* off, move the
+  view, then switch it back on.
 - The plugin does nothing in outside views and in VR.
 - How far the view turns for a given head movement is set by the profile. TrackIR's *Default* profile turns the
   view about 6× your head angle, so you can look behind you while still seeing the screen.

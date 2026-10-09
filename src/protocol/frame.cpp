@@ -28,7 +28,7 @@ bool frameChecksumValid(const uint8_t* p, size_t n)
 
 namespace {
 
-// ParseFrameType5Segments (005a3720): 8-byte records with an intensity sum.
+// ParseFrameType5Segments (005a3720): 8-byte records with the run's intensity moments.
 void decodeType5(const uint8_t* p, size_t n, int width, Frame& out)
 {
     size_t payload = n - 8;
@@ -43,7 +43,8 @@ void decodeType5(const uint8_t* p, size_t n, int width, Frame& out)
         s.y = y;
         s.x0 = float(x);
         s.x1 = float(x + len - 1);
-        s.intensitySum = ((uint32_t(b[3] & 7) << 8 | b[4]) << 8 | b[5]) << 1 | b[6] >> 7;
+        s.moment1 = ((uint32_t(b[3] & 7) << 8 | b[4]) << 8 | b[5]) << 1 | b[6] >> 7;  // segment +8
+        s.moment0 = (uint32_t(b[6]) << 8 | b[7]) & 0x7FFF;                         // segment +0xC
         out.segments.push_back(s);
     }
 }

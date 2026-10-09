@@ -2,6 +2,7 @@
 
 #include "app/resources.hpp"
 #include "common/tir_bridge.h"
+#include "output/filter.hpp"
 #include "output/np_bridge.hpp"
 #include "output/udp_sender.hpp"
 #include "protocol/frame.hpp"
@@ -14,28 +15,6 @@
 namespace tir {
 
 namespace {
-
-struct Smoother {
-    double alpha = 0;
-    bool primed = false;
-    HeadPose state;
-    HeadPose step(const HeadPose& in)
-    {
-        if (!primed) {
-            state = in;
-            primed = true;
-            return state;
-        }
-        auto mix = [&](double& s, double v) { s = alpha * s + (1 - alpha) * v; };
-        mix(state.yaw, in.yaw);
-        mix(state.pitch, in.pitch);
-        mix(state.roll, in.roll);
-        mix(state.x, in.x);
-        mix(state.y, in.y);
-        mix(state.z, in.z);
-        return state;
-    }
-};
 
 HeadPose withSigns(HeadPose p, const std::array<int, 6>& s)
 {
@@ -199,12 +178,12 @@ int Engine::runCamera(NpBridge& bridge, UdpSender& udp)
     Recentering centre(s.pivot);
 
     Profile profile;
-    Smoother smoother;
+    PoseFilter filter;
     std::array<int, 6> signs{};
     auto reloadOutput = [&] {
         std::lock_guard<std::mutex> lock(mutex_);
         profile = profile_;
-        smoother.alpha = smoothing_;
+        filter.setSmoothing(smoothing_);
         signs = axisSign_;
         outputChanged_ = false;
     };
@@ -227,7 +206,7 @@ int Engine::runCamera(NpBridge& bridge, UdpSender& udp)
     HeadPose out, frozen;
     bool wasPaused = false;
     uint32_t lastFlags = 0;
-    auto lastStats = Clock::now(), lastBeat = Clock::now(), lastPose = Clock::now();
+    auto lastStats = Clock::now(), lastBeat = Clock::now(), lastPose = Clock::now(), lastFiltered = Clock::now();
     Frame frame;
     std::vector<uint8_t> packet;
     int result = 0;
@@ -257,7 +236,10 @@ int Engine::runCamera(NpBridge& bridge, UdpSender& udp)
                             tracker.setReference(*pose);
                         }
                         measured = centre.relative(*pose);
-                        out = profile.apply(smoother.step(withSigns(measured, signs)));
+                        auto now = Clock::now();
+                        double dt = std::chrono::duration<double>(now - lastFiltered).count();
+                        lastFiltered = now;
+                        out = profile.apply(filter.step(withSigns(measured, signs), dt));
                     }
                     if (paused && !wasPaused)
                         frozen = out;

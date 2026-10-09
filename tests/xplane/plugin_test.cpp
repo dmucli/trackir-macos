@@ -140,12 +140,16 @@ int main(int argc, char** argv)
     frames();
     EXPECT_HEAD(0.1, 0.9, -0.3, 10, 0, 0);
 
-    // The user nudges the seat forward with the keyboard: the nudge is kept underneath the tracking offset.
-    fake_set_float(kRefs[2], fake_get_float(kRefs[2]) - 0.05f);
+    // X-Plane nudges the head datarefs between frames (its own head-motion effects). That must not accumulate:
+    // this is the drift seen in X-Plane 12.4 with the first version, which folded read-back changes into the base.
     bridge->publishNative(HeadPose{-10, 0, 0, 0, 0, 1}, TIR_POSE_TRACKING);
-    bridge->heartbeat();
-    frames();
-    EXPECT_HEAD(0.1, 0.9, -0.36, 10, 0, 0);
+    for (int i = 0; i < 500; i++) {
+        bridge->heartbeat();
+        for (const char* r : kRefs)
+            fake_set_float(r, fake_get_float(r) + 0.001f);
+        frames(1);
+    }
+    EXPECT_HEAD(0.1, 0.9, -0.31, 10, 0, 0);
 
     // Pause freezes the view.
     CHECK(fake_command("trackir_macos/pause"));
@@ -153,22 +157,22 @@ int main(int argc, char** argv)
     bridge->publishNative(HeadPose{40, 20, 0, 0, 0, 0}, TIR_POSE_TRACKING);
     bridge->heartbeat();
     frames();
-    EXPECT_HEAD(0.1, 0.9, -0.36, 10, 0, 0);
+    EXPECT_HEAD(0.1, 0.9, -0.31, 10, 0, 0);
     CHECK(status() == "Status: paused");
     CHECK(fake_command("trackir_macos/pause"));
     frames();
-    EXPECT_HEAD(0.1, 0.9, -0.35, -40, 20, 0);
+    EXPECT_HEAD(0.1, 0.9, -0.3, -40, 20, 0);
 
     // Recenter is forwarded to the tracker as NP_ReCenter.
     CHECK(fake_command("trackir_macos/recenter"));
     bridge->pollCommands();
     CHECK(recentres == 1);
 
-    // Clip lost: the head goes back to X-Plane's position (including the user's nudge).
+    // Clip lost: the head goes back to where it was when tracking took over.
     bridge->publishNative(HeadPose{}, 0);
     bridge->heartbeat();
     frames();
-    EXPECT_HEAD(0.1, 0.9, -0.35, 0, 0, 0);
+    EXPECT_HEAD(0.1, 0.9, -0.3, 0, 0, 0);
     CHECK(status() == "Status: clip not visible");
 
     // Outside the 3-D cockpit nothing is written.

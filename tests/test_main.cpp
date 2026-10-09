@@ -3,6 +3,7 @@
 #include "app/settings.hpp"
 #include "common/np_shared.h"
 #include "common/tir_bridge.h"
+#include "output/filter.hpp"
 #include "output/np_bridge.hpp"
 #include "output/profile.hpp"
 #include "protocol/camera.hpp"
@@ -342,21 +343,28 @@ static void testClassicDriverUploadsFpga()
 
 // ---------------------------------------------------------------------------------------------------------------
 
-static std::vector<uint8_t> makeType5Packet(const std::vector<std::array<int, 3>>& runs, uint32_t sum = 1000)
+// Each run is {x, y, len}; pixels have intensity `level` unless `profiles` gives per-pixel values for that run.
+static std::vector<uint8_t> makeType5Packet(const std::vector<std::array<int, 3>>& runs, uint32_t level = 100,
+                                            const std::vector<std::vector<uint32_t>>& profiles = {})
 {
     std::vector<uint8_t> p = {0x07, 0x10, 0x05, 0x00};
     p[3] = uint8_t(p[0] ^ p[1] ^ p[2] ^ 0xAA);
-    for (const auto& r : runs) {
-        int x = r[0], y = r[1], len = r[2];
-        uint32_t aux = 0x1234;
+    for (size_t r = 0; r < runs.size(); r++) {
+        int x = runs[r][0], y = runs[r][1], len = runs[r][2];
+        uint32_t m0 = 0, m1 = 0;
+        for (int i = 0; i < len; i++) {
+            uint32_t v = r < profiles.size() && !profiles[r].empty() ? profiles[r][size_t(i)] : level;
+            m0 += v;
+            m1 += uint32_t(i) * v;
+        }
         p.push_back(uint8_t(x >> 2));
         p.push_back(uint8_t((x & 3) << 6 | ((y >> 3) & 0x3F)));
         p.push_back(uint8_t((y & 7) << 5 | ((len >> 5) & 0x1F)));
-        p.push_back(uint8_t((len & 0x1F) << 3 | ((sum >> 17) & 7)));
-        p.push_back(uint8_t(sum >> 9));
-        p.push_back(uint8_t(sum >> 1));
-        p.push_back(uint8_t((sum & 1) << 7 | ((aux >> 8) & 0x7F)));
-        p.push_back(uint8_t(aux));
+        p.push_back(uint8_t((len & 0x1F) << 3 | ((m1 >> 17) & 7)));
+        p.push_back(uint8_t(m1 >> 9));
+        p.push_back(uint8_t(m1 >> 1));
+        p.push_back(uint8_t((m1 & 1) << 7 | ((m0 >> 8) & 0x7F)));
+        p.push_back(uint8_t(m0));
     }
     uint32_t n = uint32_t(p.size() + 4 - 8);
     p.push_back(uint8_t(n >> 24));
@@ -374,7 +382,7 @@ static void testFrameDecodeAndBlobs()
         {300, 200, 3}, {300, 201, 3}, {300, 202, 3},
         {500, 400, 4}, {501, 401, 4},
     };
-    auto pkt = makeType5Packet(runs, 77777);
+    auto pkt = makeType5Packet(runs);
     CHECK(classifyPacket(pkt.data(), pkt.size()) == PacketKind::Frame);
     CHECK(frameChecksumValid(pkt.data(), pkt.size()));
     Frame f;
@@ -382,7 +390,22 @@ static void testFrameDecodeAndBlobs()
     CHECK(f.type == 5 && f.counter == 7);
     CHECK(f.segments.size() == runs.size());
     CHECK(f.segments[0].x0 == 100 && f.segments[0].x1 == 102 && f.segments[0].y == 50);
-    CHECK(f.segments[0].intensitySum == 77777);
+    CHECK(f.segments[0].moment0 == 300 && f.segments[0].moment1 == 300);  // 3 pixels of 100: sum 300, sum i*I 300
+
+    // Sub-pixel centroid from the intensity moments (TrackIR's FUN_00588600): a run brighter on its right, and a
+    // brighter lower row, pull the centre right and down.
+    {
+        auto sub = makeType5Packet({{200, 100, 3}, {200, 101, 3}}, 100, {{50, 100, 200}, {150, 300, 600}});
+        Frame g;
+        CHECK(decodeFrame(sub.data(), sub.size(), 640, 480, g));
+        auto one = extractBlobs(g.segments);
+        CHECK(one.size() == 1);
+        if (one.size() == 1) {
+            CHECK_NEAR(one[0].x, 200 + (100 + 400 + 300 + 1200) / 1400.0, 1e-9);  // 201.4286
+            CHECK_NEAR(one[0].y, (100 * 350 + 101 * 1050) / 1400.0, 1e-9);        // 100.75
+            CHECK_NEAR(one[0].weight, 1400, 1e-9);
+        }
+    }
 
     auto blobs = extractBlobs(f.segments);
     CHECK(blobs.size() == 3);
@@ -611,6 +634,50 @@ static void testProfileCurves()
     }
 }
 
+// The pose filter must steady a still head (sensor noise) without lagging behind real movements.
+static void testPoseFilter()
+{
+    const double dt = 1.0 / 120;
+    std::mt19937 rng(7);
+    std::normal_distribution<double> noise(0.0, 0.1);  // 0.1 deg of jitter, as seen on a real camera
+
+    for (double smoothing : {0.3, 0.5}) {
+        PoseFilter f(smoothing);
+        double sum2 = 0;
+        int n = 0;
+        for (int i = 0; i < 1200; i++) {
+            HeadPose in;
+            in.yaw = 5 + noise(rng);
+            HeadPose out = f.step(in, dt);
+            if (i > 240) {
+                sum2 += (out.yaw - 5) * (out.yaw - 5);
+                n++;
+            }
+        }
+        double residual = std::sqrt(sum2 / n);
+        std::printf("  smoothing %.1f: rest cutoff %.1f Hz, jitter 0.100 -> %.3f deg\n", smoothing,
+                    PoseFilter::restCutoffHz(smoothing), residual);
+        CHECK(residual < (smoothing < 0.4 ? 0.035 : 0.022));
+
+        // A quick 60-degree glance at 200 deg/s: the output must keep up (lag well under a frame of X-Plane at 30 fps
+        // worth of angle, i.e. a few degrees), and settle on the target.
+        PoseFilter g(smoothing);
+        double worstLag = 0, yaw = 0;
+        for (int i = 0; i < 240; i++) {
+            yaw = std::min(60.0, i * dt * 200);
+            HeadPose in;
+            in.yaw = yaw;
+            HeadPose out = g.step(in, dt);
+            if (i > 10 && yaw < 60)
+                worstLag = std::max(worstLag, yaw - out.yaw);
+            if (i == 239)
+                CHECK_NEAR(out.yaw, 60, 0.5);
+        }
+        std::printf("  smoothing %.1f: lag during a 200 deg/s turn %.1f deg\n", smoothing, worstLag);
+        CHECK(worstLag < 4.0);
+    }
+}
+
 static void testSettingsFile()
 {
     char path[] = "/tmp/trackir-settings-XXXXXX";
@@ -758,6 +825,7 @@ int main()
         {"pose tracker and recentering", testPoseTrackerAndRecentering},
         {"profile curves", testProfileCurves},
         {"settings file", testSettingsFile},
+        {"pose filter", testPoseFilter},
         {"TrackIR scaling", testTrackIRScaling},
         {"NPClient bridge", testNpBridge},
     };

@@ -17,7 +17,11 @@ struct Segment {
     int y = 0;
     float x0 = 0;
     float x1 = 0;
-    uint32_t intensitySum = 0;  // only type 5 carries it; 0 otherwise
+    // Type 5 only (0 otherwise): moment0 = sum of pixel intensities, moment1 = sum of i * intensity with i counted from
+    // x0. TrackIR's centroid (FUN_00588600) is x = sum(moment1 + x0 * moment0) / sum(moment0), y = sum(y * moment0) /
+    // sum(moment0), which gives sub-pixel marker positions.
+    uint32_t moment0 = 0;
+    uint32_t moment1 = 0;
 };
 
 struct Frame {

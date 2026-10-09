@@ -69,12 +69,20 @@ std::vector<Blob> extractBlobs(const std::vector<Segment>& input, int minArea, i
         size_t k = size_t(blobOf[size_t(root)]);
         const Segment& seg = segs[s];
         int length = int(seg.x1 - seg.x0) + 1;
-        double w = seg.intensitySum ? double(seg.intensitySum) : double(length);
         Blob& b = blobs[k];
         b.area += length;
-        b.weight += w;
-        sumX[k] += w * (seg.x0 + seg.x1) * 0.5;
-        sumY[k] += w * seg.y;
+        if (seg.moment0) {
+            // Intensity-weighted, sub-pixel (FUN_00588600).
+            double w = seg.moment0;
+            b.weight += w;
+            sumX[k] += double(seg.moment1) + seg.x0 * w;
+            sumY[k] += seg.y * w;
+        } else {
+            double w = length;
+            b.weight += w;
+            sumX[k] += w * (seg.x0 + seg.x1) * 0.5;
+            sumY[k] += w * seg.y;
+        }
         b.minX = std::min(b.minX, int(seg.x0));
         b.maxX = std::max(b.maxX, int(seg.x1));
         b.minY = std::min(b.minY, seg.y);

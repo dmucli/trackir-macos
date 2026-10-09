@@ -21,7 +21,7 @@ CORE_SRC := src/common/np_shared.c \
             src/protocol/secure_codec.cpp src/protocol/frame.cpp src/protocol/camera_models.cpp \
             src/protocol/secure_camera.cpp src/protocol/classic_camera.cpp \
             src/vision/blobs.cpp src/vision/pose.cpp \
-            src/output/profile.cpp src/output/np_bridge.cpp src/output/udp_sender.cpp \
+            src/output/profile.cpp src/output/filter.cpp src/output/np_bridge.cpp src/output/udp_sender.cpp \
             src/app/resources.cpp src/app/settings.cpp
 ENGINE_SRC := src/app/engine.cpp src/usb/iousbhost_link.mm
 APP_SRC  := src/app/main.cpp $(ENGINE_SRC)
@@ -113,7 +113,7 @@ xplane-test: $(XPLANE_PLUGIN) $(XPTEST)/plugin-test
 
 $(XPTEST)/XPLM.framework/XPLM: tests/xplane/fake_xplm.cpp | $(XPSDK)/CHeaders/XPLM/XPLMDefs.h
 	@mkdir -p $(dir $@)
-	$(CXX) $(XPFLAGS) -dynamiclib -install_name @executable_path/../../../Resources/plugins/XPLM.framework/XPLM -o $@ $<
+	$(CXX) $(XPFLAGS) -mmacosx-version-min=$(MACOS_MIN) -dynamiclib -install_name @executable_path/../../../Resources/plugins/XPLM.framework/XPLM -o $@ $<
 
 $(XPTEST)/plugin-test: tests/xplane/plugin_test.cpp $(BUILD)/src/output/np_bridge.o $(BUILD)/src/common/np_shared.o $(XPTEST)/XPLM.framework/XPLM
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ tests/xplane/plugin_test.cpp $(BUILD)/src/output/np_bridge.o \

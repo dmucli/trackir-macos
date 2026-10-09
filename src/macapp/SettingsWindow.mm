@@ -307,7 +307,8 @@ static NSView* padded(NSView* content)
         @[ label(@"Clip:"), _clipType ],
         @[ [NSGridCell emptyContentView], _irLights ],
         @[ label(@"Smoothing:"), [NSStackView stackViewWithViews:@[ _smoothing, _smoothingValue ]] ],
-        @[ [NSGridCell emptyContentView], note(@"Higher is steadier but adds lag. TrackIR's default is about 0.3.") ],
+        @[ [NSGridCell emptyContentView], note(@"Higher is steadier while you hold still. Quick head movements stay responsive at any setting "
+                @"(the filter lightens as you move). Try 0.5 if the view shakes when you are still.") ],
         @[ label(@"Marker threshold:"), [NSStackView stackViewWithViews:@[ _threshold, _thresholdValue ]] ],
         @[ [NSGridCell emptyContentView],
            note(@"Raise it if reflections show up as extra markers in the Live View; lower it if the clip "
