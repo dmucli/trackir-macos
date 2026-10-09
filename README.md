@@ -30,7 +30,7 @@ TrackIR 5.5.3.
 |---|---|
 | TrackIR 5, current model (USB id 131d:0159) | Works: tested on a real camera (123 frames/s) |
 | Menu-bar app, axis check, opentrack output | Works |
-| X-Plane plugin | Built and tested against a simulated X-Plane; not yet flown in the real sim. Reports welcome |
+| X-Plane plugin | Works: tested in X-Plane 12.4.3 on Apple Silicon. X-Plane 11 should work but is untested |
 | Older TrackIR 5 (131d:0157 / 0158) | Implemented, untested |
 | Wine/CrossOver `NPClient.dll` | Verified against NaturalPoint's own DLL in an emulator; not yet tried with a real game |
 | TrackIR 4 and older | Not supported |
