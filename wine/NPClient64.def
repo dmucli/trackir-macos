@@ -1,0 +1,25 @@
+LIBRARY NPClient64.dll
+EXPORTS
+    NPPriv_ClientNotify @1
+    NPPriv_GetLastError @2
+    NPPriv_SetData @3
+    NPPriv_SetLastError @4
+    NPPriv_SetParameter @5
+    NPPriv_SetSignature @6
+    NPPriv_SetVersion @7
+    NP_GetData @8
+    NP_GetDataEX @9
+    NP_GetParameter @10
+    NP_GetSignature @11
+    NP_QueryVersion @12
+    NP_ReCenter @13
+    NP_RegisterProgramProfileID @14
+    NP_RegisterWindowHandle @15
+    NP_RequestData @16
+    NP_SetParameter @17
+    NP_StartCursor @18
+    NP_StartDataTransmission @19
+    NP_StopCursor @20
+    NP_StopDataTransmission @21
+    NP_UnregisterWindowHandle @22
+    GetThreadExeName @23
