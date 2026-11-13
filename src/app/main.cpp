@@ -61,7 +61,8 @@ void usage()
         "  trackir-mac parse-dump <file>            decode packets saved with --dump (one hex packet per line)\n"
         "\n"
         "Defaults come from ~/Library/Application Support/TrackIR-macOS/settings.ini (written by the menu-bar\n"
-        "app and by `check`); options override them for one run.\n"
+        "app and by `check`); options override them for one run. The command line always uses the TrackIR\n"
+        "camera; AirPods head tracking is in the menu-bar app.\n"
         "\n"
         "run options:\n"
         "  --profile <file.xml>       TrackIR profile (Profiles/*.xml); default: 1:1 curves\n"
@@ -108,6 +109,8 @@ RunOptions parseRunOptions(int argc, char** argv)
     RunOptions o;
     o.engine.settings = Settings::load();
     Settings& s = o.engine.settings;
+    // AirPods tracking needs the menu-bar app (its main run loop and its Motion & Fitness permission).
+    s.source = HeadSource::TrackIR;
     for (int i = 2; i < argc; i++) {
         std::string a = argv[i];
         auto next = [&]() -> std::string {

@@ -222,6 +222,12 @@ static NSString* ns(const std::string& s)
     NSTextField* _udpPort;
     NSPopUpButton* _keyRecenter;
     NSPopUpButton* _keyPause;
+    NSPopUpButton* _keySource;
+    // AirPods
+    NSPopUpButton* _source;
+    NSButton* _apInvert[3];
+    NSSlider* _apDrift;
+    NSTextField* _apDriftValue;
 }
 
 static NSTextField* label(NSString* text)
@@ -276,7 +282,11 @@ static NSView* padded(NSView* content)
     NSTabViewItem* output = [[NSTabViewItem alloc] initWithIdentifier:@"output"];
     output.label = @"Output & Keys";
     output.view = [self buildOutput];
+    NSTabViewItem* airpods = [[NSTabViewItem alloc] initWithIdentifier:@"airpods"];
+    airpods.label = @"AirPods";
+    airpods.view = [self buildAirPods];
     [tabs addTabViewItem:general];
+    [tabs addTabViewItem:airpods];
     [tabs addTabViewItem:curves];
     [tabs addTabViewItem:output];
     w.contentView = tabs;
@@ -317,6 +327,43 @@ static NSView* padded(NSView* content)
         @[ [NSGridCell emptyContentView],
            note(@"Measured by “Run Axis Check in Terminal…” in the menu. Changing the clip, IR or threshold "
                 @"restarts the camera for a second.") ],
+    ]];
+    grid.rowSpacing = 10;
+    grid.columnSpacing = 10;
+    return padded(grid);
+}
+
+- (NSView*)buildAirPods
+{
+    _source = [[NSPopUpButton alloc] init];
+    [_source addItemsWithTitles:@[ @"TrackIR 5 camera", @"AirPods" ]];
+    _source.target = self;
+    _source.action = @selector(changed:);
+    NSString* const names[3] = {@"Invert yaw (turn)", @"Invert pitch (nod)", @"Invert roll (tilt)"};
+    for (int i = 0; i < 3; i++)
+        _apInvert[i] = [NSButton checkboxWithTitle:names[i] target:self action:@selector(changed:)];
+    _apDrift = [NSSlider sliderWithValue:0 minValue:0 maxValue:3 target:self action:@selector(changed:)];
+    [_apDrift.widthAnchor constraintEqualToConstant:260].active = YES;
+    _apDriftValue = [NSTextField labelWithString:@""];
+
+    NSGridView* grid = [NSGridView gridViewWithViews:@[
+        @[ label(@"Head tracker:"), _source ],
+        @[ [NSGridCell emptyContentView],
+           note(@"Also in the menu-bar menu, and on a key of your choice (Output & Keys). The profile, smoothing "
+                @"and every output (X-Plane, Wine games, opentrack) work the same with either tracker.") ],
+        @[ label(@"Directions:"), [NSStackView stackViewWithViews:@[ _apInvert[0], _apInvert[1], _apInvert[2] ]] ],
+        @[ [NSGridCell emptyContentView],
+           note(@"Tick one if that axis moves the wrong way (watch the Live View). AirPods measure rotation only: "
+                @"leaning and sliding (X, Y, Z) stay at zero.") ],
+        @[ label(@"Yaw drift correction:"), [NSStackView stackViewWithViews:@[ _apDrift, _apDriftValue ]] ],
+        @[ [NSGridCell emptyContentView],
+           note(@"AirPods slowly drift in yaw over a long session. This pulls the view back to the centre by at "
+                @"most this many degrees per second. 0 turns it off; recentering (F12) also fixes drift.") ],
+        @[ label(@"Requirements:"),
+           note(@"macOS 14 or later and AirPods with spatial-audio head tracking (AirPods 3rd generation, AirPods 4, "
+                @"AirPods Pro, AirPods Max or Beats Fit Pro). They must be the Mac's audio output: if the status "
+                @"says “waiting for motion”, play some audio. Allow TrackIR for macOS in System Settings › Privacy "
+                @"& Security › Motion & Fitness.") ],
     ]];
     grid.rowSpacing = 10;
     grid.columnSpacing = 10;
@@ -365,7 +412,8 @@ static NSView* padded(NSView* content)
     [_udpPort.widthAnchor constraintEqualToConstant:70].active = YES;
     _keyRecenter = [[NSPopUpButton alloc] init];
     _keyPause = [[NSPopUpButton alloc] init];
-    for (NSPopUpButton* p in @[ _keyRecenter, _keyPause ]) {
+    _keySource = [[NSPopUpButton alloc] init];
+    for (NSPopUpButton* p in @[ _keyRecenter, _keyPause, _keySource ]) {
         [p addItemsWithTitles:functionKeyNames()];
         p.target = self;
         p.action = @selector(changed:);
@@ -377,6 +425,7 @@ static NSView* padded(NSView* content)
         @[ label(@"Host / port:"), [NSStackView stackViewWithViews:@[ _udpHost, _udpPort ]] ],
         @[ label(@"Recenter key:"), _keyRecenter ],
         @[ label(@"Pause key:"), _keyPause ],
+        @[ label(@"Switch tracker key:"), _keySource ],
         @[ [NSGridCell emptyContentView],
            note(@"Global keys work in every app. On a Mac keyboard press fn with the F key unless “Use F1, F2, "
                 @"etc. keys as standard function keys” is on. In X-Plane you can also bind the "
@@ -403,6 +452,13 @@ static NSView* padded(NSView* content)
     [_keyPause selectItemWithTitle:ns(s.hotkeyPause)];
     if (!_keyPause.selectedItem)
         [_keyPause selectItemAtIndex:0];
+    [_keySource selectItemWithTitle:ns(s.hotkeySource)];
+    if (!_keySource.selectedItem)
+        [_keySource selectItemAtIndex:0];
+    [_source selectItemAtIndex:s.source == HeadSource::AirPods ? 1 : 0];
+    for (int i = 0; i < 3; i++)
+        _apInvert[i].state = s.airpodsAxisSign[size_t(i)] < 0 ? NSControlStateValueOn : NSControlStateValueOff;
+    _apDrift.doubleValue = s.airpodsDrift;
     static const char* names[6] = {"yaw", "pitch", "roll", "x", "y", "z"};
     NSMutableString* signs = [NSMutableString string];
     for (int i = 0; i < 6; i++)
@@ -417,6 +473,8 @@ static NSView* padded(NSView* content)
 {
     _smoothingValue.stringValue = [NSString stringWithFormat:@"%.2f", _smoothing.doubleValue];
     _thresholdValue.stringValue = [NSString stringWithFormat:@"%ld", (long)_threshold.integerValue];
+    _apDriftValue.stringValue = _apDrift.doubleValue < 0.05 ? @"off"
+                                                             : [NSString stringWithFormat:@"%.1f °/s", _apDrift.doubleValue];
     NSString* path = [_controller profilePath];
     NSString* name = path ? path.lastPathComponent.stringByDeletingPathExtension : @"Linear (1:1)";
     _profileLabel.stringValue = [NSString stringWithFormat:@"Profile: %@%@", name,
@@ -503,6 +561,12 @@ static NSView* padded(NSView* content)
     s.udpPort = _udpPort.intValue > 0 && _udpPort.intValue < 65536 ? _udpPort.intValue : 4242;
     s.hotkeyRecenter = _keyRecenter.titleOfSelectedItem.UTF8String ?: "none";
     s.hotkeyPause = _keyPause.titleOfSelectedItem.UTF8String ?: "none";
+    s.hotkeySource = _keySource.titleOfSelectedItem.UTF8String ?: "none";
+    s.source = _source.indexOfSelectedItem == 1 ? HeadSource::AirPods : HeadSource::TrackIR;
+    for (int i = 0; i < 3; i++)
+        s.airpodsAxisSign[size_t(i)] = _apInvert[i].state == NSControlStateValueOn ? -1 : 1;
+    double drift = std::round(_apDrift.doubleValue * 10) / 10;
+    s.airpodsDrift = drift < 0.05 ? 0 : drift;
     [_controller applySettings:s];
     [self updateLabels];
 }

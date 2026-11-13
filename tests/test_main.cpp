@@ -3,6 +3,7 @@
 #include "app/settings.hpp"
 #include "common/np_shared.h"
 #include "common/tir_bridge.h"
+#include "motion/headphone_pose.hpp"
 #include "output/filter.hpp"
 #include "output/np_bridge.hpp"
 #include "output/profile.hpp"
@@ -693,6 +694,10 @@ static void testSettingsFile()
     s.axisSign = {{1, -1, 1, -1, 1, 1}};
     s.focalScale = 1.0625;
     s.hotkeyPause = "none";
+    s.source = HeadSource::AirPods;
+    s.hotkeySource = "F10";
+    s.airpodsAxisSign = {{-1, 1, -1}};
+    s.airpodsDrift = 0.5;
     CHECK(s.save(path));
     Settings t = Settings::load(path);
     CHECK(t.profile == s.profile && t.smoothing == 0.5 && t.clipType == ClipType::TrackClipPro);
@@ -700,9 +705,71 @@ static void testSettingsFile()
     CHECK(t.udp && t.udpPort == 5555 && t.udpHost == "127.0.0.1");
     CHECK(t.axisSign == s.axisSign && std::fabs(t.focalScale - 1.0625) < 1e-9);
     CHECK(t.hotkeyPause == "none" && t.hotkeyRecenter == "F12");
+    CHECK(t.source == HeadSource::AirPods && t.hotkeySource == "F10");
+    CHECK(t.airpodsAxisSign == s.airpodsAxisSign && t.airpodsDrift == 0.5);
     Settings missing = Settings::load("/nonexistent/settings.ini");
     CHECK(missing.smoothing == 0.3 && missing.axisSign[0] == 1);
+    CHECK(missing.source == HeadSource::TrackIR && missing.hotkeySource == "none" && missing.airpodsDrift == 0);
     unlink(path);
+}
+
+// AirPods body frame: x right, y forward, z up.
+static void testHeadphoneTracker()
+{
+    const Quat yawL = Quat::axisAngle(0, 0, 1, 30), pitch = Quat::axisAngle(1, 0, 0, 20),
+               roll = Quat::axisAngle(0, 1, 0, -15);
+    HeadphoneEuler e = headphoneEuler(yawL);
+    CHECK_NEAR(e.yaw, 30, 1e-9);
+    CHECK_NEAR(e.pitch, 0, 1e-9);
+    CHECK_NEAR(e.roll, 0, 1e-9);
+    CHECK_NEAR(headphoneEuler(pitch).pitch, 20, 1e-9);
+    CHECK_NEAR(headphoneEuler(roll).roll, -15, 1e-9);
+    // Intrinsic Z-X'-Y'': R = Rz(yaw) Rx(pitch) Ry(roll) decomposes back into its three angles.
+    e = headphoneEuler(Quat::axisAngle(0, 0, 1, 40) * Quat::axisAngle(1, 0, 0, -25) * Quat::axisAngle(0, 1, 0, 10));
+    CHECK_NEAR(e.yaw, 40, 1e-9);
+    CHECK_NEAR(e.pitch, -25, 1e-9);
+    CHECK_NEAR(e.roll, 10, 1e-9);
+
+    // The first sample is the centre, whatever way the headphones face; movements are measured from there.
+    const Quat centre = Quat::axisAngle(0.3, -0.5, 0.8, 70);
+    HeadphoneTracker t;
+    HeadPose h = t.update(centre, 0);
+    CHECK_NEAR(h.yaw, 0, 1e-9);
+    CHECK_NEAR(h.pitch, 0, 1e-9);
+    CHECK_NEAR(h.roll, 0, 1e-9);
+    h = t.update(centre * yawL, 0.04);
+    CHECK_NEAR(h.yaw, 30, 1e-9);  // turning left is yaw +, as for the camera
+    CHECK_NEAR(h.pitch, 0, 1e-9);
+    // HeadPose has pitch + up and roll + left: the AirPods readings are negated (AirTracker's measured defaults).
+    h = t.update(centre * pitch, 0.08);
+    CHECK_NEAR(h.pitch, -20, 1e-9);
+    h = t.update(centre * roll, 0.12);
+    CHECK_NEAR(h.roll, 15, 1e-9);
+    CHECK(h.x == 0 && h.y == 0 && h.z == 0);
+    // q and -q are the same attitude.
+    Quat flipped = centre * yawL;
+    flipped = {-flipped.w, -flipped.x, -flipped.y, -flipped.z};
+    CHECK_NEAR(t.update(flipped, 0.16).yaw, 30, 1e-9);
+
+    t.recenter();
+    h = t.update(centre * yawL, 0.2);
+    CHECK_NEAR(h.yaw, 0, 1e-9);
+    h = t.update(centre, 0.24);
+    CHECK_NEAR(h.yaw, -30, 1e-9);
+
+    // Drift correction: holding a 30-degree turn for 10 s at 1 deg/s brings the view 10 degrees back.
+    HeadphoneTracker d;
+    d.setDriftRate(1.0);
+    d.update(centre, 0);
+    for (int i = 1; i <= 250; i++)
+        h = d.update(centre * yawL, i * 0.04);
+    CHECK_NEAR(h.yaw, 20, 0.05);
+    // A long gap between samples counts as at most 0.2 s.
+    h = d.update(centre * yawL, 100);
+    CHECK_NEAR(h.yaw, 19.8, 0.05);
+    CHECK_NEAR(stepYawDrift(0, 5, 2, 0.5), 1, 1e-12);
+    CHECK_NEAR(stepYawDrift(0, 0.3, 2, 0.5), 0.3, 1e-12);
+    CHECK_NEAR(stepYawDrift(0, -5, 2, 0.5), -1, 1e-12);
 }
 
 static void testTrackIRScaling()
@@ -826,6 +893,7 @@ int main()
         {"profile curves", testProfileCurves},
         {"settings file", testSettingsFile},
         {"pose filter", testPoseFilter},
+        {"AirPods head tracker", testHeadphoneTracker},
         {"TrackIR scaling", testTrackIRScaling},
         {"NPClient bridge", testNpBridge},
     };

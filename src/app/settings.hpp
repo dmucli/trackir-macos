@@ -10,7 +10,11 @@
 
 namespace tir {
 
+// Which head tracker drives the outputs.
+enum class HeadSource { TrackIR = 0, AirPods = 1 };
+
 struct Settings {
+    HeadSource source = HeadSource::TrackIR;
     std::string profile;                  // TrackIR profile XML; empty = 1:1 curves
     double smoothing = 0.3;               // 0..0.95
     ClipType clipType = ClipType::TrackClip;
@@ -26,6 +30,10 @@ struct Settings {
     double focalScale = 1.0;              // multiplies the lens focal length
     std::string hotkeyRecenter = "F12";   // menu-bar app; "none" disables
     std::string hotkeyPause = "F9";
+    std::string hotkeySource = "none";    // switches between TrackIR and AirPods
+    // AirPods: direction fixes for yaw, pitch, roll, and the yaw drift correction in degrees per second (0 = off).
+    std::array<int, 3> airpodsAxisSign{{1, 1, 1}};
+    double airpodsDrift = 0;
 
     static std::string defaultPath();     // resourceDirectory() + "/settings.ini"
     // Missing file or keys keep the defaults; unknown keys are ignored.

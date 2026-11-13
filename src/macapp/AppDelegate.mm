@@ -86,6 +86,7 @@ private:
 };
 
 @interface AppDelegate : NSObject <NSApplicationDelegate, NSMenuDelegate, TrackerController>
+- (void)switchSource:(id)sender;
 @end
 
 @implementation AppDelegate {
@@ -99,6 +100,9 @@ private:
 
     NSStatusItem* _statusItem;
     NSMenuItem* _statusLine;
+    NSMenuItem* _sourceHeader;
+    NSMenuItem* _sourceTrackIR;
+    NSMenuItem* _sourceAirPods;
     NSMenuItem* _trackingItem;
     NSMenuItem* _pauseItem;
     NSMenuItem* _recenterItem;
@@ -110,6 +114,7 @@ private:
 
     EventHotKeyRef _hotRecenter;
     EventHotKeyRef _hotPause;
+    EventHotKeyRef _hotSource;
 
     LiveWindowController* _live;
     SettingsWindowController* _settingsWindow;
@@ -125,6 +130,8 @@ static OSStatus onHotKey(EventHandlerCallRef, EventRef event, void* context)
             [app recenter];
         else if (key.id == 2)
             [app togglePause];
+        else if (key.id == 3)
+            [app switchSource:nil];
     });
     return noErr;
 }
@@ -206,8 +213,9 @@ static OSStatus onHotKey(EventHandlerCallRef, EventRef event, void* context)
                    old.udpHost != settings.udpHost || old.udpPort != settings.udpPort ||
                    old.pivot.x != settings.pivot.x || old.pivot.y != settings.pivot.y ||
                    old.pivot.z != settings.pivot.z || old.focalScale != settings.focalScale ||
-                   old.gameKeys != settings.gameKeys;
-    bool keys = old.hotkeyRecenter != settings.hotkeyRecenter || old.hotkeyPause != settings.hotkeyPause;
+                   old.gameKeys != settings.gameKeys || old.source != settings.source;
+    bool keys = old.hotkeyRecenter != settings.hotkeyRecenter || old.hotkeyPause != settings.hotkeyPause ||
+                old.hotkeySource != settings.hotkeySource;
     _settings = settings;
     _settings.save();
     _settingsMtime = [self settingsModificationTime];
@@ -216,6 +224,7 @@ static OSStatus onHotKey(EventHandlerCallRef, EventRef event, void* context)
     if (Engine* e = _host.engine()) {
         e->setSmoothing(_settings.smoothing);
         e->setAxisSigns(_settings.axisSign);
+        e->setAirPodsTuning(_settings.airpodsAxisSign, _settings.airpodsDrift);
     }
     if (restart && _trackingOn) {
         bool paused = _host.engine() && _host.engine()->paused();
@@ -314,6 +323,18 @@ static OSStatus onHotKey(EventHandlerCallRef, EventRef event, void* context)
     _statusLine.enabled = NO;
     [menu addItem:_statusLine];
     [menu addItem:[NSMenuItem separatorItem]];
+    _sourceHeader = [self item:@"Head tracker" action:nil];
+    _sourceHeader.enabled = NO;
+    [menu addItem:_sourceHeader];
+    _sourceTrackIR = [self item:@"TrackIR 5" action:@selector(chooseSource:)];
+    _sourceTrackIR.tag = int(HeadSource::TrackIR);
+    _sourceAirPods = [self item:@"AirPods" action:@selector(chooseSource:)];
+    _sourceAirPods.tag = int(HeadSource::AirPods);
+    for (NSMenuItem* it in @[ _sourceTrackIR, _sourceAirPods ]) {
+        it.indentationLevel = 1;
+        [menu addItem:it];
+    }
+    [menu addItem:[NSMenuItem separatorItem]];
     _trackingItem = [self item:@"Tracking" action:@selector(toggleTracking:)];
     [menu addItem:_trackingItem];
     _pauseItem = [self item:@"Pause" action:@selector(pauseClicked:)];
@@ -354,6 +375,12 @@ static OSStatus onHotKey(EventHandlerCallRef, EventRef event, void* context)
 - (void)updateMenuState
 {
     _trackingItem.state = _trackingOn ? NSControlStateValueOn : NSControlStateValueOff;
+    bool airpods = _settings.source == HeadSource::AirPods;
+    _sourceTrackIR.state = airpods ? NSControlStateValueOff : NSControlStateValueOn;
+    _sourceAirPods.state = airpods ? NSControlStateValueOn : NSControlStateValueOff;
+    NSString* key = [self hotkeySuffix:_settings.hotkeySource];
+    _sourceHeader.title = key.length ? [NSString stringWithFormat:@"Head tracker   (switch: %@)", ns(_settings.hotkeySource)]
+                                     : @"Head tracker";
     Engine* e = _host.engine();
     _pauseItem.state = e && e->paused() ? NSControlStateValueOn : NSControlStateValueOff;
     _pauseItem.enabled = e != nullptr;
@@ -469,6 +496,24 @@ static OSStatus onHotKey(EventHandlerCallRef, EventRef event, void* context)
     [[NSWorkspace sharedWorkspace] openURL:[NSURL fileURLWithPath:dir]];
 }
 
+- (void)chooseSource:(NSMenuItem*)sender
+{
+    HeadSource source = HeadSource(sender.tag);
+    if (source == _settings.source)
+        return;
+    Settings s = _settings;
+    s.source = source;
+    [self applySettings:s];
+    [_settingsWindow reload];
+}
+
+// Hotkey: TrackIR <-> AirPods.
+- (void)switchSource:(id)sender
+{
+    NSMenuItem* target = _settings.source == HeadSource::AirPods ? _sourceTrackIR : _sourceAirPods;
+    [self chooseSource:target];
+}
+
 - (void)toggleTracking:(id)sender
 {
     _trackingOn = !_trackingOn;
@@ -560,13 +605,18 @@ static OSStatus onHotKey(EventHandlerCallRef, EventRef event, void* context)
         UnregisterEventHotKey(_hotRecenter);
     if (_hotPause)
         UnregisterEventHotKey(_hotPause);
-    _hotRecenter = _hotPause = nullptr;
+    if (_hotSource)
+        UnregisterEventHotKey(_hotSource);
+    _hotRecenter = _hotPause = _hotSource = nullptr;
     int recenter = functionKeyCode(ns(_settings.hotkeyRecenter));
     int pause = functionKeyCode(ns(_settings.hotkeyPause));
+    int source = functionKeyCode(ns(_settings.hotkeySource));
     if (recenter >= 0)
         RegisterEventHotKey(UInt32(recenter), 0, EventHotKeyID{'TIRM', 1}, GetApplicationEventTarget(), 0, &_hotRecenter);
     if (pause >= 0 && pause != recenter)
         RegisterEventHotKey(UInt32(pause), 0, EventHotKeyID{'TIRM', 2}, GetApplicationEventTarget(), 0, &_hotPause);
+    if (source >= 0 && source != recenter && source != pause)
+        RegisterEventHotKey(UInt32(source), 0, EventHotKeyID{'TIRM', 3}, GetApplicationEventTarget(), 0, &_hotSource);
 }
 
 // --- periodic UI update -----------------------------------------------------------------------------------------
@@ -585,6 +635,8 @@ static OSStatus onHotKey(EventHandlerCallRef, EventRef event, void* context)
         return;
     _lastSymbol = name;
     NSImage* image = [NSImage imageWithSystemSymbolName:name accessibilityDescription:@"TrackIR"];
+    if (!image)  // symbol missing from this macOS version
+        image = [NSImage imageWithSystemSymbolName:@"headphones" accessibilityDescription:@"TrackIR"];
     [image setTemplate:YES];
     _statusItem.button.image = image;
 }
@@ -607,6 +659,20 @@ static OSStatus onHotKey(EventHandlerCallRef, EventRef event, void* context)
     if (!_trackingOn) {
         line = @"Tracking is off";
         symbol = @"pause.circle";
+    } else if (s.source == HeadSource::AirPods) {
+        if (s.state == State::Streaming && s.paused) {
+            line = @"AirPods: paused";
+            symbol = @"pause.circle";
+        } else if (s.state == State::Streaming) {
+            line = [NSString stringWithFormat:@"AirPods: tracking, %u Hz", s.framesPerSecond];
+            symbol = @"airpods";
+        } else if (s.state == State::Failed) {
+            line = [NSString stringWithFormat:@"AirPods: %@", ns(s.message)];
+            symbol = @"exclamationmark.triangle";
+        } else {
+            line = s.message.empty() ? @"AirPods: starting…" : ns(s.message);
+            symbol = @"headphones";
+        }
     } else if (s.state == State::NoCamera) {
         line = @"No TrackIR camera connected";
         symbol = @"video.slash";
