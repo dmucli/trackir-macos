@@ -18,7 +18,7 @@ using namespace tir;
 }
 
 // AirPods: a sight that moves with the head (yaw across, pitch up and down, roll tilts the bar), from the centred
-// measurement before the profile, ±60° to the edges.
+// measurement after the Invert boxes and before the profile, ±60° to the edges.
 - (void)drawHeadphones:(NSRect)field
 {
     const EngineStatus& s = _status;
