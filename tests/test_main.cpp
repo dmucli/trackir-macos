@@ -740,9 +740,9 @@ static void testHeadphoneTracker()
     h = t.update(centre * yawL, 0.04);
     CHECK_NEAR(h.yaw, 30, 1e-9);  // turning left is yaw +, as for the camera
     CHECK_NEAR(h.pitch, 0, 1e-9);
-    // HeadPose has pitch + up and roll + left: the AirPods readings are negated (AirTracker's measured defaults).
+    // Nose up is pitch + in both frames; roll is negated (HeadPose has roll + left).
     h = t.update(centre * pitch, 0.08);
-    CHECK_NEAR(h.pitch, -20, 1e-9);
+    CHECK_NEAR(h.pitch, 20, 1e-9);
     h = t.update(centre * roll, 0.12);
     CHECK_NEAR(h.roll, 15, 1e-9);
     CHECK(h.x == 0 && h.y == 0 && h.z == 0);

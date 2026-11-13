@@ -474,7 +474,8 @@ int Engine::runAirPods(NpBridge& bridge, UdpSender& udp)
             status_.clipVisible = live;
             status_.distanceCm = 0;
             if (!samples.empty()) {
-                status_.measured = measured;
+                // After the Invert boxes, so the Live View and the curve editor show the direction the game gets.
+                status_.measured = withSigns(measured, signs);
                 status_.poseCounter++;
             }
             status_.output = published;

@@ -39,7 +39,8 @@ struct EngineStatus {
     bool clipVisible = false;     // AirPods: motion data is arriving
     bool paused = false;
     double distanceCm = 0;        // clip centre to camera
-    HeadPose measured;            // centred, before axis corrections, smoothing and profile
+    HeadPose measured;            // centred, before axis corrections (AirPods: after its Invert boxes), smoothing
+                                  // and profile
     HeadPose output;              // what the outputs receive
     uint64_t poseCounter = 0;     // increments with every solved pose
 };

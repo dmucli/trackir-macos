@@ -68,11 +68,12 @@ HeadPose HeadphoneTracker::update(const Quat& attitude, double seconds)
     lastTime_ = seconds;
     haveTime_ = true;
 
-    // AirTracker found on real AirPods that looking up reads as negative pitch, and that tilting the head to the
-    // right reads as positive roll. HeadPose wants pitch + up and roll + left, so both are negated.
+    // In the body frame, yaw + is a left turn and pitch + is nose up, as HeadPose wants (checked on AirPods 3;
+    // AirTracker negates pitch for opentrack's convention, not because the sensor reads it backwards). Roll + is
+    // right ear down, and HeadPose wants roll + left, so roll is negated.
     HeadPose h;
     h.yaw = e.yaw;
-    h.pitch = -e.pitch;
+    h.pitch = e.pitch;
     h.roll = -e.roll;
     return h;
 }
