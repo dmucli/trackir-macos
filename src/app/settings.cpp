@@ -64,7 +64,8 @@ Settings Settings::load(const std::string& path)
             continue;
         std::string key = trim(line.substr(0, eq)), value = trim(line.substr(eq + 1));
         try {
-            if (key == "profile") s.profile = value;
+            if (key == "source") s.source = value == "airpods" ? HeadSource::AirPods : HeadSource::TrackIR;
+            else if (key == "profile") s.profile = value;
             else if (key == "smoothing") s.smoothing = std::clamp(std::stod(value), 0.0, 0.95);
             else if (key == "clip_type") s.clipType = value == "pro" ? ClipType::TrackClipPro : ClipType::TrackClip;
             else if (key == "clip") {
@@ -89,6 +90,13 @@ Settings Settings::load(const std::string& path)
             else if (key == "focal_scale") s.focalScale = std::clamp(std::stod(value), 0.5, 2.0);
             else if (key == "hotkey_recenter") s.hotkeyRecenter = value;
             else if (key == "hotkey_pause") s.hotkeyPause = value;
+            else if (key == "hotkey_source") s.hotkeySource = value;
+            else if (key == "airpods_axis_sign") {
+                auto v = numbers(value);
+                for (size_t i = 0; i < v.size() && i < 3; i++)
+                    s.airpodsAxisSign[i] = v[i] < 0 ? -1 : 1;
+            }
+            else if (key == "airpods_drift") s.airpodsDrift = std::clamp(std::stod(value), 0.0, 10.0);
         } catch (...) {
             // keep the default for a malformed value
         }
@@ -107,10 +115,13 @@ bool Settings::save(const std::string& path) const
         if (!f)
             return false;
         double clip[2] = {clipLeg, clipBase}, piv[3] = {pivot.x, pivot.y, pivot.z};
-        double signs[6];
+        double signs[6], airpodsSigns[3];
         for (int i = 0; i < 6; i++)
             signs[i] = axisSign[size_t(i)];
+        for (int i = 0; i < 3; i++)
+            airpodsSigns[i] = airpodsAxisSign[size_t(i)];
         f << "# trackir-mac settings (edited by the menu-bar app and `trackir-mac check`)\n"
+          << "source = " << (source == HeadSource::AirPods ? "airpods" : "trackir") << "\n"
           << "profile = " << profile << "\n"
           << "smoothing = " << smoothing << "\n"
           << "clip_type = " << (clipType == ClipType::TrackClipPro ? "pro" : "clip") << "\n"
@@ -126,7 +137,10 @@ bool Settings::save(const std::string& path) const
           << "axis_sign = " << joinNumbers(signs, 6) << "\n"
           << "focal_scale = " << focalScale << "\n"
           << "hotkey_recenter = " << hotkeyRecenter << "\n"
-          << "hotkey_pause = " << hotkeyPause << "\n";
+          << "hotkey_pause = " << hotkeyPause << "\n"
+          << "hotkey_source = " << hotkeySource << "\n"
+          << "airpods_axis_sign = " << joinNumbers(airpodsSigns, 3) << "\n"
+          << "airpods_drift = " << airpodsDrift << "\n";
         if (!f)
             return false;
     }

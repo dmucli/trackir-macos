@@ -9,6 +9,8 @@ TrackIR 5.5.3.
 - **X-Plane 11/12 plugin**: your head moves the pilot's view in the 3-D cockpit. No opentrack, no network setup.
 - **opentrack output** (UDP), for any other app that opentrack supports.
 - **Windows games under Wine/CrossOver**: drop-in `NPClient.dll` / `NPClient64.dll` so games see normal TrackIR.
+- **AirPods as a head tracker**: switch from the TrackIR camera to AirPods (3rd generation or newer, Pro, Max) in
+  the menu, or with a key. Everything above works the same with either one. See [AirPods](#airpods).
 - No kernel extension and no third-party libraries: it talks to the camera directly over USB.
 
 > Unofficial project, not affiliated with or endorsed by NaturalPoint. TrackIR is a trademark of NaturalPoint, Inc.
@@ -20,7 +22,9 @@ TrackIR 5.5.3.
 - A Mac with macOS 12 or later (Apple Silicon or Intel).
 - A **TrackIR 5** camera and a **TrackClip** (reflective) or **TrackClip PRO** (LED). An ordinary webcam will not
   work, because the TrackIR camera finds the markers in hardware.
-- The Xcode Command Line Tools (`xcode-select --install`). That is all the project needs to build.
+- Or, instead of the camera: AirPods with spatial-audio head tracking and macOS 14 or later. See [AirPods](#airpods).
+- The Xcode Command Line Tools (`xcode-select --install`). That is all the project needs to build. For AirPods
+  you need tools from Xcode 15 or later (they include the macOS 14 SDK).
 - Optional: NaturalPoint's free Windows installer `TrackIR_5.5.3.exe` from naturalpoint.com, for TrackIR's own
   profiles (recommended) and for older TrackIR 5 revisions. See step 2.
 
@@ -33,6 +37,7 @@ TrackIR 5.5.3.
 | X-Plane plugin | Works: tested in X-Plane 12.4.3 on Apple Silicon. X-Plane 11 should work but is untested |
 | Older TrackIR 5 (131d:0157 / 0158) | Implemented, untested |
 | Wine/CrossOver `NPClient.dll` | Verified against NaturalPoint's own DLL in an emulator; not yet tried with a real game |
+| AirPods head tracking | New: builds on the code of [AirTracker](https://github.com/crippler95/airtracker), not yet tried on real AirPods with this app |
 | TrackIR 4 and older | Not supported |
 
 ## Install
@@ -83,7 +88,8 @@ The results are saved, and the app picks them up. Switch **Tracking** back on in
 
 | Menu item | What it does |
 |---|---|
-| Tracking | Turns the camera on or off |
+| Head tracker: TrackIR 5 / AirPods | Which tracker moves the view. Switching takes about a second |
+| Tracking | Turns the camera (or AirPods tracking) on or off |
 | Pause (F9) | Freezes the view where it is; press again to resume |
 | Recenter (F12) | Makes your current head position the centre |
 | Live View… | The camera image (markers) and the six output axes |
@@ -109,6 +115,39 @@ it smooths heavily when you are still and lightly when you move, so quick glance
 **If tracking is jumpy**, open the Live View. It should show exactly three green dots. Extra grey dots are
 reflections or other infrared sources (sunlight, glasses, shiny surfaces). Remove them, or raise the marker
 threshold in Settings › Camera.
+
+## AirPods
+
+AirPods can replace the TrackIR camera. They measure how your head turns (yaw, pitch and roll), but not leaning or
+sliding, so X, Y and Z stay at zero. You don't need a clip, a camera or a line of sight.
+
+You need macOS 14 or later and AirPods that support spatial-audio head tracking: AirPods (3rd generation), AirPods
+4, AirPods Pro, AirPods Max or Beats Fit Pro.
+
+1. Connect the AirPods to the Mac and make them the audio output (Control Centre › Sound). They only send motion
+   while they are the Mac's output, so if the status says "waiting for motion", play some audio.
+2. In the menu-bar menu, under **Head tracker**, choose **AirPods**. The first time, macOS asks for access to
+   *Motion & Fitness*: allow it. If you said no, turn it on in System Settings › Privacy & Security › Motion &
+   Fitness.
+3. Look straight at the screen and press **Recenter** (F12).
+4. Open the **Live View**. The green sight follows your head. If an axis moves the wrong way, tick its *Invert* box
+   in Settings › AirPods.
+
+To switch back and forth quickly, pick a key for *Switch tracker key* in Settings › Output & Keys. Avoid keys your
+game uses (DCS uses most F-keys for views).
+
+The profile, smoothing, X-Plane plugin, Wine `NPClient.dll` and opentrack output all work the same with AirPods, so
+DCS under CrossOver sees normal TrackIR either way.
+
+Tips:
+
+- AirPods report about 25 times a second. The app smooths between readings, so the view moves without steps.
+- Over a long flight the yaw can drift slowly. Press Recenter, or set *Yaw drift correction* in Settings › AirPods
+  (try 0.5 °/s). It pulls the view back to the centre at that speed, so leave it at 0 if you hold long looks to
+  the side.
+- Turn off automatic switching on your iPhone (Settings › Bluetooth › your AirPods › Connect to This iPhone › When
+  Last Connected to This iPhone) so the AirPods don't jump to the phone mid-game.
+- AirPods tracking is in the menu-bar app only. `trackir-mac` on the command line always uses the camera.
 
 ## X-Plane
 
@@ -168,6 +207,9 @@ before running `trackir-mac run`.
 | Clip not found at the edges of your movement | Lower the marker threshold, or move the camera so you stay inside its view |
 | An axis moves the wrong way | Run the axis check. To flip an axis only for one profile, use *Inverted* in Settings › Curves |
 | X-Plane plugin status says "tracker not running" | Start the menu-bar app and make sure Tracking is ticked |
+| AirPods: "not connected, or not the Mac's audio output" | Pick the AirPods as the output in Control Centre › Sound |
+| AirPods: "waiting for motion" | Play some audio through them. Check that spatial audio head tracking works in Control Centre |
+| AirPods: "Motion & Fitness access is off" | System Settings › Privacy & Security › Motion & Fitness: turn on TrackIR for macOS. After a rebuild of the app you may need to turn it off and on again |
 
 ## Building and testing
 
@@ -187,6 +229,7 @@ src/protocol/   camera USB protocols (TrackIR 5 "secure" protocol, older FPGA-ba
 src/vision/     marker blobs, lens model, TrackIR's pose solver, recentring
 src/output/     profile curves, NPClient bridge, opentrack UDP
 src/usb/        USB through Apple's IOUSBHost framework
+src/motion/     AirPods head tracking (CoreMotion), ported from AirTracker
 src/app/        tracking engine, settings, command-line tool
 src/macapp/     menu-bar app (Cocoa)
 xplane/         X-Plane plugin
@@ -201,7 +244,8 @@ docs/           PROTOCOL.md: the reverse-engineered protocol and algorithms
 ```
 TrackIR camera ──USB──▶ trackir-mac engine ──▶ /tmp/TrackIR-macOS.bridge ──▶ X-Plane plugin
  (finds the IR markers)   (pose + profile)                          └──────▶ NPClient.dll (Wine games)
-                                           └──▶ UDP ──▶ opentrack
+                     ▲                     └──▶ UDP ──▶ opentrack
+AirPods ──CoreMotion─┘ (or)
 ```
 
 The camera reports the bright infrared spots it sees, not video. The engine finds the clip's three markers, solves
@@ -217,6 +261,8 @@ protocol, the frame formats, the lens and pose model, and the game-side shared-m
 - The X-Plane SDK is downloaded at build time and is under its own licence (Laminar Research / Sandy Barbour and
   Ben Supnik).
 - Released under the [MIT licence](LICENSE).
+- The AirPods support is ported in part from [AirTracker](https://github.com/crippler95/airtracker) (MIT licence).
+  Its notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - **Rights holders:** if you represent NaturalPoint or another rights holder and have a concern about anything in
   this repository, please [open an issue](https://github.com/dmucli/trackir-macos/issues) and it will be looked at
   promptly, including removing material where appropriate.

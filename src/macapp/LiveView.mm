@@ -1,6 +1,7 @@
-// Live View: what the camera sees (marker blobs) and the six output axes.
+// Live View: what the camera sees (marker blobs), or where the AirPods point, and the six output axes.
 #import "MacApp.h"
 
+#include <algorithm>
 #include <cmath>
 
 using namespace tir;
@@ -16,11 +17,44 @@ using namespace tir;
     return YES;  // sensor rows grow downwards
 }
 
+// AirPods: a sight that moves with the head (yaw across, pitch up and down, roll tilts the bar), from the centred
+// measurement before the profile, ±60° to the edges.
+- (void)drawHeadphones:(NSRect)field
+{
+    const EngineStatus& s = _status;
+    NSBezierPath* axes = [NSBezierPath bezierPath];
+    [axes moveToPoint:NSMakePoint(NSMidX(field), field.origin.y)];
+    [axes lineToPoint:NSMakePoint(NSMidX(field), NSMaxY(field))];
+    [axes moveToPoint:NSMakePoint(field.origin.x, NSMidY(field))];
+    [axes lineToPoint:NSMakePoint(NSMaxX(field), NSMidY(field))];
+    [[NSColor colorWithWhite:0.4 alpha:1] setStroke];
+    axes.lineWidth = 1;
+    [axes stroke];
+    if (s.state != EngineStatus::State::Streaming)
+        return;
+    const double range = 60;
+    // Turning left (yaw +) moves the sight left; looking up (pitch +) moves it up (the view is flipped).
+    double fx = std::clamp(-s.measured.yaw / range, -1.0, 1.0), fy = std::clamp(-s.measured.pitch / range, -1.0, 1.0);
+    NSPoint c = NSMakePoint(NSMidX(field) + fx * field.size.width / 2, NSMidY(field) + fy * field.size.height / 2);
+    double a = s.measured.roll * M_PI / 180, len = field.size.width * 0.12;
+    // Roll + is a left tilt: the bar's left end goes down (y grows downwards here).
+    NSBezierPath* bar = [NSBezierPath bezierPath];
+    [bar moveToPoint:NSMakePoint(c.x - len * std::cos(a), c.y + len * std::sin(a))];
+    [bar lineToPoint:NSMakePoint(c.x + len * std::cos(a), c.y - len * std::sin(a))];
+    NSColor* color = s.clipVisible ? NSColor.systemGreenColor : NSColor.systemOrangeColor;
+    [color setStroke];
+    bar.lineWidth = 3;
+    [bar stroke];
+    [color setFill];
+    [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(c.x - 6, c.y - 6, 12, 12)] fill];
+}
+
 - (void)drawRect:(NSRect)dirty
 {
     const EngineStatus& s = _status;
     [[NSColor colorWithWhite:0.08 alpha:1] setFill];
     NSRectFill(self.bounds);
+    bool airpods = s.source == HeadSource::AirPods;
 
     double sw = s.sensorWidth > 0 ? s.sensorWidth : 640, sh = s.sensorHeight > 0 ? s.sensorHeight : 480;
     double scale = std::min(self.bounds.size.width / sw, self.bounds.size.height / sh);
@@ -40,6 +74,8 @@ using namespace tir;
     grid.lineWidth = 0.5;
     [grid stroke];
 
+    if (airpods)
+        [self drawHeadphones:field];
     // The camera faces the user, so mirror x: moving right moves the dots right, like a mirror.
     for (size_t i = 0; i < s.blobs.size(); i++) {
         const Blob& b = s.blobs[i];
@@ -54,6 +90,9 @@ using namespace tir;
     NSString* text;
     if (s.state != EngineStatus::State::Streaming)
         text = [NSString stringWithUTF8String:s.message.c_str()] ?: @"";
+    else if (airpods)
+        text = [NSString stringWithFormat:@"AirPods   %u Hz   yaw %+.0f°  pitch %+.0f°  roll %+.0f°", s.framesPerSecond,
+                                          s.measured.yaw, s.measured.pitch, s.measured.roll];
     else
         text = [NSString stringWithFormat:@"%u fps   %zu marker%@   %@", s.framesPerSecond, s.blobs.size(),
                                           s.blobs.size() == 1 ? @"" : @"s",
@@ -133,7 +172,7 @@ using namespace tir;
                                                         NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable
                                                 backing:NSBackingStoreBuffered
                                                   defer:NO];
-    w.title = @"TrackIR Live View";
+    w.title = @"Live View";
     w.releasedWhenClosed = NO;
     w.contentMinSize = NSMakeSize(700, 400);
     if (!(self = [super initWithWindow:w]))

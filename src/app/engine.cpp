@@ -2,6 +2,7 @@
 
 #include "app/resources.hpp"
 #include "common/tir_bridge.h"
+#include "motion/headphone_motion.hpp"
 #include "output/filter.hpp"
 #include "output/np_bridge.hpp"
 #include "output/udp_sender.hpp"
@@ -33,8 +34,11 @@ Engine::Engine(EngineOptions options)
     : options_(std::move(options)),
       profile_(loadProfile(options_.settings.profile)),
       smoothing_(options_.settings.smoothing),
-      axisSign_(options_.settings.axisSign)
+      axisSign_(options_.settings.axisSign),
+      airpodsSign_(options_.settings.airpodsAxisSign),
+      airpodsDrift_(options_.settings.airpodsDrift)
 {
+    status_.source = options_.settings.source;
 }
 
 Engine::~Engine() = default;
@@ -70,6 +74,14 @@ void Engine::setAxisSigns(const std::array<int, 6>& signs)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     axisSign_ = signs;
+    outputChanged_ = true;
+}
+
+void Engine::setAirPodsTuning(const std::array<int, 3>& signs, double driftDegPerSecond)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    airpodsSign_ = signs;
+    airpodsDrift_ = driftDegPerSecond;
     outputChanged_ = true;
 }
 
@@ -123,7 +135,7 @@ int Engine::run()
     while (!stop_) {
         if (Clock::now() - lastAttempt >= std::chrono::seconds(1)) {
             lastAttempt = Clock::now();
-            result = runCamera(bridge, udp);
+            result = s.source == HeadSource::AirPods ? runAirPods(bridge, udp) : runCamera(bridge, udp);
             if (!options_.waitForCamera || stop_)
                 break;
         }
@@ -314,6 +326,174 @@ int Engine::runCamera(NpBridge& bridge, UdpSender& udp)
     }
     if (!link->disconnected())
         driver->shutdown();
+    bridge.publishNative(HeadPose{}, 0);
+    return result;
+}
+
+// AirPods: CoreMotion delivers the headphones' attitude at about 25 Hz. The loop ticks at about 100 Hz and feeds the
+// latest sample to the adaptive filter each tick, so the view glides between samples instead of moving in 25 Hz steps.
+// The outputs are the same as for the camera, so the X-Plane plugin, Wine games and opentrack need no changes.
+int Engine::runAirPods(NpBridge& bridge, UdpSender& udp)
+{
+    using State = EngineStatus::State;
+    State shownState = State::Starting;
+    std::string shownMessage;
+    auto show = [&](State state, const std::string& message) {
+        if (state == shownState && message == shownMessage)
+            return;
+        if (state == State::Failed || shownState == State::Failed || state == State::Streaming)
+            log("AirPods: " + message);
+        shownState = state;
+        shownMessage = message;
+        setState(state, message);
+    };
+
+    auto idle = [&] {
+        bridge.pollCommands();
+        bridge.heartbeat();
+        bridge.publishNative(HeadPose{}, 0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    };
+    if (!HeadphoneMotion::supported()) {
+        show(State::Failed, "AirPods head tracking needs macOS 14 or later");
+        while (options_.waitForCamera && !stop_)
+            idle();
+        return 1;
+    }
+
+    HeadphoneMotion motion;
+    motion.start();
+    log("AirPods: waiting for headphones with head tracking");
+
+    HeadphoneTracker tracker;
+    Profile profile;
+    PoseFilter filter;
+    std::array<int, 6> signs{};
+    auto reloadOutput = [&] {
+        std::lock_guard<std::mutex> lock(mutex_);
+        profile = profile_;
+        filter.setSmoothing(smoothing_);
+        signs = {airpodsSign_[0], airpodsSign_[1], airpodsSign_[2], 1, 1, 1};
+        tracker.setDriftRate(airpodsDrift_);
+        outputChanged_ = false;
+    };
+    reloadOutput();
+    log("profile: " + profile.name);
+
+    const auto tick = std::chrono::milliseconds(10);
+    auto now = Clock::now();
+    auto lastSample = now - std::chrono::hours(1), lastFiltered = now, lastStats = now, lastBeat = now,
+         lastRestart = now, lastPermissionCheck = now - std::chrono::hours(1);
+    std::vector<HeadphoneSample> samples;
+    HeadPose measured, out, frozen;
+    bool haveSample = false, wasPaused = false, connected = false, available = true;
+    auto permission = HeadphoneMotion::Permission::NotDetermined;
+    unsigned count = 0;
+    int result = 0;
+    while (!stop_) {
+        motion.wait(samples, tick);
+        now = Clock::now();
+        HeadphoneMotion::Status ms = motion.status();
+        available = ms.available;
+        connected = ms.connected;
+        if (ms.connects) {
+            log("AirPods connected");
+            tracker.recenter();  // a new connection starts a new reference frame
+        }
+        if (ms.disconnects)
+            log("AirPods disconnected");
+        if (now - lastPermissionCheck >= std::chrono::seconds(1)) {
+            permission = HeadphoneMotion::permission();
+            lastPermissionCheck = now;
+        }
+        if (outputChanged_)
+            reloadOutput();
+        if (recenter_.exchange(false))
+            tracker.recenter();
+
+        for (const auto& sample : samples) {
+            double t = std::chrono::duration<double>(sample.time.time_since_epoch()).count();
+            measured = tracker.update(sample.attitude, t);
+            haveSample = true;
+            lastSample = now;
+            count++;
+        }
+        bool live = haveSample && now - lastSample < std::chrono::milliseconds(500);
+
+        // dt must stay above 0 (the filter treats 0 as a restart), so it steps at most once per tick.
+        double dt = std::chrono::duration<double>(now - lastFiltered).count();
+        bool stepped = dt >= 0.008;
+        if (stepped) {
+            lastFiltered = now;
+            if (live)
+                out = profile.apply(filter.step(withSigns(measured, signs), dt));
+        }
+        bool paused = paused_;
+        if (paused && !wasPaused)
+            frozen = out;
+        wasPaused = paused;
+        const HeadPose& published = paused ? frozen : out;
+        if (stepped) {
+            if (live || paused) {
+                bridge.publish(published, true);
+                udp.send(published);
+            }
+            uint32_t flags = (live ? TIR_POSE_TRACKING : 0) | (paused ? TIR_POSE_PAUSED | TIR_POSE_TRACKING : 0);
+            bridge.publishNative(published, flags);
+        }
+        bridge.pollCommands();
+        if (now - lastBeat > std::chrono::milliseconds(100)) {
+            bridge.heartbeat();
+            lastBeat = now;
+        }
+
+        // The headphones stopped sending (they went to sleep or another device took them): start the updates again.
+        if ((connected || haveSample) && !live && now - lastRestart > std::chrono::seconds(5)) {
+            motion.restart();
+            lastRestart = now;
+        }
+
+        if (!available)
+            show(State::Failed, "this Mac cannot read headphone motion");
+        else if (permission == HeadphoneMotion::Permission::Denied)
+            show(State::Failed, "Motion & Fitness access is off (System Settings > Privacy & Security > Motion & "
+                                "Fitness)");
+        else if (live)
+            show(State::Streaming, "AirPods");
+        else if (connected)
+            show(State::Connecting, "AirPods connected, waiting for motion (play some audio through them)");
+        else
+            show(State::NoCamera, "AirPods not connected, or not the Mac's audio output");
+        if (!options_.waitForCamera && shownState == State::Failed) {
+            result = 1;
+            break;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            status_.clipVisible = live;
+            status_.distanceCm = 0;
+            if (!samples.empty()) {
+                status_.measured = measured;
+                status_.poseCounter++;
+            }
+            status_.output = published;
+        }
+        if (now - lastStats >= std::chrono::seconds(1)) {
+            EngineStatus snapshot;
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                status_.framesPerSecond = status_.posesPerSecond = shownState == State::Streaming ? count : 0;
+                snapshot = status_;
+            }
+            snapshot.paused = paused_;
+            if (onSecond)
+                onSecond(snapshot);
+            count = 0;
+            lastStats = now;
+        }
+    }
+    motion.stop();
     bridge.publishNative(HeadPose{}, 0);
     return result;
 }

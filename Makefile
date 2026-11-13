@@ -15,15 +15,16 @@ CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter
 CFLAGS   := -std=c99 -O2 -Wall -Wextra
 LDFLAGS  := -mmacosx-version-min=$(MACOS_MIN)
 OBJCXXFLAGS := $(CXXFLAGS) -fobjc-arc
-FRAMEWORKS := -framework Foundation -framework IOKit -framework IOUSBHost
+# CoreMotion is weak-linked: AirPods head tracking needs macOS 14, the rest of the app runs on macOS 12.
+FRAMEWORKS := -framework Foundation -framework IOKit -framework IOUSBHost -weak_framework CoreMotion
 
 CORE_SRC := src/common/np_shared.c \
             src/protocol/secure_codec.cpp src/protocol/frame.cpp src/protocol/camera_models.cpp \
             src/protocol/secure_camera.cpp src/protocol/classic_camera.cpp \
-            src/vision/blobs.cpp src/vision/pose.cpp \
+            src/vision/blobs.cpp src/vision/pose.cpp src/motion/headphone_pose.cpp \
             src/output/profile.cpp src/output/filter.cpp src/output/np_bridge.cpp src/output/udp_sender.cpp \
             src/app/resources.cpp src/app/settings.cpp
-ENGINE_SRC := src/app/engine.cpp src/usb/iousbhost_link.mm
+ENGINE_SRC := src/app/engine.cpp src/usb/iousbhost_link.mm src/motion/headphone_motion.mm
 APP_SRC  := src/app/main.cpp $(ENGINE_SRC)
 TEST_SRC := tests/test_main.cpp
 

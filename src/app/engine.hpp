@@ -1,5 +1,6 @@
 // The tracking loop of RunTrackingFrameLoop (00497120), shared by the CLI, `check` and the menu-bar app:
 // camera -> blobs -> pose -> recentre -> axis corrections -> smoothing -> profile -> outputs.
+// With Settings::source = AirPods, the headphones' attitude replaces the camera steps (rotation only).
 #pragma once
 
 #include "app/settings.hpp"
@@ -26,14 +27,16 @@ struct EngineOptions {
 };
 
 struct EngineStatus {
+    // For AirPods: NoCamera = not connected, Connecting = connected but no motion data yet.
     enum class State { Starting, NoCamera, Connecting, Streaming, Failed, Stopped };
+    HeadSource source = HeadSource::TrackIR;
     State state = State::Starting;
     std::string message;          // camera name / error text
     std::string cameraState;      // driver state machine, e.g. "streaming"
-    unsigned framesPerSecond = 0, posesPerSecond = 0;
+    unsigned framesPerSecond = 0, posesPerSecond = 0;  // AirPods: motion samples per second
     std::vector<Blob> blobs;      // last frame, heaviest first (at most 16)
     int sensorWidth = 640, sensorHeight = 480;
-    bool clipVisible = false;
+    bool clipVisible = false;     // AirPods: motion data is arriving
     bool paused = false;
     double distanceCm = 0;        // clip centre to camera
     HeadPose measured;            // centred, before axis corrections, smoothing and profile
@@ -57,6 +60,7 @@ public:
     void setProfile(const Profile& profile);
     void setSmoothing(double alpha);
     void setAxisSigns(const std::array<int, 6>& signs);
+    void setAirPodsTuning(const std::array<int, 3>& signs, double driftDegPerSecond);
 
     EngineStatus status() const;
 
@@ -70,6 +74,7 @@ public:
 
 private:
     int runCamera(class NpBridge& bridge, class UdpSender& udp);
+    int runAirPods(class NpBridge& bridge, class UdpSender& udp);
     void setState(EngineStatus::State state, const std::string& message);
 
     EngineOptions options_;
@@ -79,6 +84,8 @@ private:
     Profile profile_;
     double smoothing_;
     std::array<int, 6> axisSign_;
+    std::array<int, 3> airpodsSign_;
+    double airpodsDrift_;
     bool outputChanged_ = false;
 };
 
