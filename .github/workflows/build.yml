@@ -36,7 +36,7 @@ jobs:
           lipo -info build/universal/TrackIR-macOS.app/Contents/MacOS/trackir-mac
           codesign --verify --deep --strict build/universal/TrackIR-macOS.app
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: TrackIR-macOS
           path: build/universal/dist/*.zip
