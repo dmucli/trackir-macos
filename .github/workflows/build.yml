@@ -16,7 +16,7 @@ jobs:
     permissions:
       contents: write  # only used to attach the downloads to a published release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install MinGW (for the Wine DLLs)
         run: brew install mingw-w64
@@ -36,7 +36,7 @@ jobs:
           lipo -info build/universal/TrackIR-macOS.app/Contents/MacOS/trackir-mac
           codesign --verify --deep --strict build/universal/TrackIR-macOS.app
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: TrackIR-macOS
           path: build/universal/dist/*.zip

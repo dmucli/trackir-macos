@@ -36,7 +36,7 @@ TrackIR 5.5.3.
 | Menu-bar app, axis check, opentrack output | Works |
 | X-Plane plugin | Works: tested in X-Plane 12.4.3 on Apple Silicon. X-Plane 11 should work but is untested |
 | Older TrackIR 5 (131d:0157 / 0158) | Implemented, untested |
-| Wine/CrossOver `NPClient.dll` | Verified against NaturalPoint's own DLL in an emulator; not yet tried with a real game |
+| Wine/CrossOver `NPClient.dll` | Works: tested in DCS under CrossOver (with AirPods). Also verified against NaturalPoint's own DLL in an emulator |
 | AirPods head tracking | Works: tested with AirPods (3rd generation), in flight. Builds on [AirTracker](https://github.com/crippler95/airtracker) |
 | TrackIR 4 and older | Not supported |
 
