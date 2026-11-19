@@ -10,8 +10,8 @@
 
 namespace tir {
 
-// Which head tracker drives the outputs.
-enum class HeadSource { TrackIR = 0, AirPods = 1 };
+// Which head tracker drives the outputs. Auto: the TrackIR camera while one is plugged in, AirPods otherwise.
+enum class HeadSource { TrackIR = 0, AirPods = 1, Auto = 2 };
 
 struct Settings {
     HeadSource source = HeadSource::TrackIR;
@@ -34,6 +34,7 @@ struct Settings {
     // AirPods: direction fixes for yaw, pitch, roll, and the yaw drift correction in degrees per second (0 = off).
     std::array<int, 3> airpodsAxisSign{{1, 1, 1}};
     double airpodsDrift = 0;
+    bool airpodsNeckModel = false;        // add the small eye movement of a head turning about the neck
 
     static std::string defaultPath();     // resourceDirectory() + "/settings.ini"
     // Missing file or keys keep the defaults; unknown keys are ignored.

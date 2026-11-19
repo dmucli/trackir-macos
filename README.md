@@ -37,12 +37,22 @@ TrackIR 5.5.3.
 | X-Plane plugin | Works: tested in X-Plane 12.4.3 on Apple Silicon. X-Plane 11 should work but is untested |
 | Older TrackIR 5 (131d:0157 / 0158) | Implemented, untested |
 | Wine/CrossOver `NPClient.dll` | Verified against NaturalPoint's own DLL in an emulator; not yet tried with a real game |
-| AirPods head tracking | New: builds on the code of [AirTracker](https://github.com/crippler95/airtracker), not yet tried on real AirPods with this app |
+| AirPods head tracking | Works: tested with AirPods (3rd generation), in flight. Builds on [AirTracker](https://github.com/crippler95/airtracker) |
 | TrackIR 4 and older | Not supported |
 
 ## Install
 
-### 1. Build
+### 1. Download, or build
+
+**Download:** on the [Releases page](https://github.com/dmucli/trackir-macos/releases), get
+`TrackIR-macOS-app.zip` (and `TrackIR-macOS-xplane-plugin.zip` or `TrackIR-macOS-NPClient-dlls.zip` if you need
+them). Unzip it and move *TrackIR-macOS* to your Applications folder. It runs on Apple Silicon and Intel Macs.
+
+The download is not notarised by Apple, so the first time macOS refuses to open it. Open it once, then go to System
+Settings › Privacy & Security, scroll down and click **Open Anyway**. (Or, in Terminal:
+`xattr -dr com.apple.quarantine /Applications/TrackIR-macOS.app`.) You only need to do this once per version.
+
+**Build** it yourself instead (this needs the Xcode Command Line Tools):
 
 ```sh
 git clone https://github.com/dmucli/trackir-macos.git
@@ -88,7 +98,7 @@ The results are saved, and the app picks them up. Switch **Tracking** back on in
 
 | Menu item | What it does |
 |---|---|
-| Head tracker: TrackIR 5 / AirPods | Which tracker moves the view. Switching takes about a second |
+| Head tracker: TrackIR 5 / AirPods / Automatic | Which tracker moves the view. *Automatic* uses the camera while it is plugged in and AirPods otherwise. Switching takes about a second |
 | Tracking | Turns the camera (or AirPods tracking) on or off |
 | Pause (F9) | Freezes the view where it is; press again to resume |
 | Recenter (F12) | Makes your current head position the centre |
@@ -134,7 +144,15 @@ You need macOS 14 or later and AirPods that support spatial-audio head tracking:
    in Settings › AirPods.
 
 To switch back and forth quickly, pick a key for *Switch tracker key* in Settings › Output & Keys. Avoid keys your
-game uses (DCS uses most F-keys for views).
+game uses (DCS uses most F-keys for views). The key always switches to the other tracker, and leaves Automatic.
+
+**Automatic** (under Head tracker in the menu) uses the TrackIR camera while one is plugged in, and the AirPods
+otherwise. Unplug the camera and the AirPods take over within a few seconds; plug it back in and the camera takes
+over again. The view recentres on each change, so look at the screen when you plug or unplug.
+
+**Neck model** (Settings › AirPods): your head turns about your neck, so your eyes move a few centimetres when you
+look around or down. With this on, the view moves that little bit too, which feels more natural than pure rotation.
+It is not leaning: AirPods cannot measure that.
 
 The profile, smoothing, X-Plane plugin, Wine `NPClient.dll` and opentrack output all work the same with AirPods, so
 DCS under CrossOver sees normal TrackIR either way.
@@ -220,9 +238,14 @@ make xplane       # build/xplane/TrackIR-macOS/mac_x64/TrackIR-macOS.xpl (Intel 
 make test         # unit and integration tests, with camera emulators
 make xplane-test  # loads the plugin into a fake X-Plane and drives it
 make npclient     # Wine DLLs (brew install mingw-w64)
+make dist         # zip files for a release in build/dist (needs mingw-w64 too)
 make verify VENDOR=~/TrackIR5   # byte-exact comparison with your own copy of the vendor binaries under an
                                 # x86 emulator (python3 -m venv .venv && .venv/bin/pip install pefile unicorn)
 ```
+
+GitHub builds and tests every pull request on a Mac (`.github/workflows/build.yml`). To publish a version, create a
+release on GitHub (Releases › Draft a new release, with a tag such as `v0.4.0`) and publish it: the same workflow
+builds the downloads for Apple Silicon and Intel and attaches them to the release a few minutes later.
 
 ```
 src/protocol/   camera USB protocols (TrackIR 5 "secure" protocol, older FPGA-based cameras), frame decoding

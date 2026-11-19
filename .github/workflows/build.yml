@@ -1,0 +1,48 @@
+# Builds and tests on a real Mac for every pull request and every push to main.
+# When a release is published on GitHub, it also attaches the finished downloads to that release.
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  macos:
+    runs-on: macos-15
+    permissions:
+      contents: write  # only used to attach the downloads to a published release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MinGW (for the Wine DLLs)
+        run: brew install mingw-w64
+
+      - name: Unit tests
+        run: make test
+
+      - name: X-Plane plugin test
+        run: make xplane-test
+
+      - name: Build the downloads (Apple Silicon + Intel)
+        run: make dist BUILD=build/universal ARCHFLAGS="-arch arm64 -arch x86_64"
+
+      - name: Check the app runs on both kinds of Mac
+        run: |
+          lipo -info build/universal/TrackIR-macOS.app/Contents/MacOS/TrackIR-macOS
+          lipo -info build/universal/TrackIR-macOS.app/Contents/MacOS/trackir-mac
+          codesign --verify --deep --strict build/universal/TrackIR-macOS.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TrackIR-macOS
+          path: build/universal/dist/*.zip
+
+      - name: Attach the downloads to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" build/universal/dist/*.zip --clobber

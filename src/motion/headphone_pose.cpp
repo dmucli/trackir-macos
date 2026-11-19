@@ -36,6 +36,23 @@ HeadphoneEuler headphoneEuler(const Quat& q)
     return e;
 }
 
+// HeadPose axes: x right, y up, z towards the screen; yaw + left, pitch + up, roll + left. The rotation is yaw about
+// the vertical, then pitch about the head's left-right axis, then roll about its forward axis.
+HeadPose withNeckModel(HeadPose pose, double forwardCm, double upCm)
+{
+    const double psi = pose.yaw / kDeg, theta = pose.pitch / kDeg, phi = pose.roll / kDeg;
+    // Head forward and up after pitch and roll, before yaw.
+    const double fx = 0, fy = std::sin(theta), fz = std::cos(theta);
+    const double ux = -std::sin(phi), uy = std::cos(theta) * std::cos(phi), uz = -std::sin(theta) * std::cos(phi);
+    double px = forwardCm * fx + upCm * ux, py = forwardCm * fy + upCm * uy, pz = forwardCm * fz + upCm * uz;
+    // Yaw left takes forward (0, 0, 1) to (-sin, 0, cos).
+    double x = px * std::cos(psi) - pz * std::sin(psi), z = px * std::sin(psi) + pz * std::cos(psi);
+    pose.x += x;
+    pose.y += py - upCm;
+    pose.z += z - forwardCm;
+    return pose;
+}
+
 double stepYawDrift(double drift, double yaw, double rate, double dt)
 {
     double maxStep = rate * dt;

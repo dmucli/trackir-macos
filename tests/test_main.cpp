@@ -698,6 +698,7 @@ static void testSettingsFile()
     s.hotkeySource = "F10";
     s.airpodsAxisSign = {{-1, 1, -1}};
     s.airpodsDrift = 0.5;
+    s.airpodsNeckModel = true;
     CHECK(s.save(path));
     Settings t = Settings::load(path);
     CHECK(t.profile == s.profile && t.smoothing == 0.5 && t.clipType == ClipType::TrackClipPro);
@@ -706,10 +707,14 @@ static void testSettingsFile()
     CHECK(t.axisSign == s.axisSign && std::fabs(t.focalScale - 1.0625) < 1e-9);
     CHECK(t.hotkeyPause == "none" && t.hotkeyRecenter == "F12");
     CHECK(t.source == HeadSource::AirPods && t.hotkeySource == "F10");
-    CHECK(t.airpodsAxisSign == s.airpodsAxisSign && t.airpodsDrift == 0.5);
+    CHECK(t.airpodsAxisSign == s.airpodsAxisSign && t.airpodsDrift == 0.5 && t.airpodsNeckModel);
+    s.source = HeadSource::Auto;
+    CHECK(s.save(path));
+    CHECK(Settings::load(path).source == HeadSource::Auto);
     Settings missing = Settings::load("/nonexistent/settings.ini");
     CHECK(missing.smoothing == 0.3 && missing.axisSign[0] == 1);
     CHECK(missing.source == HeadSource::TrackIR && missing.hotkeySource == "none" && missing.airpodsDrift == 0);
+    CHECK(!missing.airpodsNeckModel);
     unlink(path);
 }
 
@@ -770,6 +775,42 @@ static void testHeadphoneTracker()
     CHECK_NEAR(stepYawDrift(0, 5, 2, 0.5), 1, 1e-12);
     CHECK_NEAR(stepYawDrift(0, 0.3, 2, 0.5), 0.3, 1e-12);
     CHECK_NEAR(stepYawDrift(0, -5, 2, 0.5), -1, 1e-12);
+}
+
+static void testNeckModel()
+{
+    HeadPose still = withNeckModel(HeadPose{});
+    CHECK_NEAR(still.x, 0, 1e-12);
+    CHECK_NEAR(still.y, 0, 1e-12);
+    CHECK_NEAR(still.z, 0, 1e-12);
+    HeadPose p;
+    p.yaw = 90;  // look fully left: the eyes swing 8 cm left and 8 cm back
+    HeadPose n = withNeckModel(p);
+    CHECK_NEAR(n.x, -8, 1e-9);
+    CHECK_NEAR(n.y, 0, 1e-9);
+    CHECK_NEAR(n.z, -8, 1e-9);
+    CHECK(n.yaw == 90);  // angles pass through
+    p = {};
+    p.pitch = -90;  // look straight down: eyes 18 cm lower, 2 cm forward
+    n = withNeckModel(p);
+    CHECK_NEAR(n.x, 0, 1e-9);
+    CHECK_NEAR(n.y, -18, 1e-9);
+    CHECK_NEAR(n.z, 2, 1e-9);
+    p = {};
+    p.roll = 30;  // tilt left: eyes move left and a little down
+    n = withNeckModel(p);
+    CHECK_NEAR(n.x, -5, 1e-9);
+    CHECK_NEAR(n.y, 10 * std::cos(M_PI / 6) - 10, 1e-9);
+    CHECK_NEAR(n.z, 0, 1e-9);
+    p = {};
+    p.yaw = 30;
+    p.pitch = -20;
+    p.x = 1;  // existing translation is kept
+    n = withNeckModel(p);
+    CHECK(n.x < 1 && n.y < 0);  // left and down
+    // The eyes stay on a sphere around the pivot.
+    double dx = n.x - 1, dy = n.y + 10, dz = n.z + 8;
+    CHECK_NEAR(std::sqrt(dx * dx + dy * dy + dz * dz), std::sqrt(164.0), 1e-9);
 }
 
 static void testTrackIRScaling()
@@ -894,6 +935,7 @@ int main()
         {"settings file", testSettingsFile},
         {"pose filter", testPoseFilter},
         {"AirPods head tracker", testHeadphoneTracker},
+        {"neck model", testNeckModel},
         {"TrackIR scaling", testTrackIRScaling},
         {"NPClient bridge", testNpBridge},
     };
