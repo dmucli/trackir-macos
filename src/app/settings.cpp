@@ -64,7 +64,10 @@ Settings Settings::load(const std::string& path)
             continue;
         std::string key = trim(line.substr(0, eq)), value = trim(line.substr(eq + 1));
         try {
-            if (key == "source") s.source = value == "airpods" ? HeadSource::AirPods : HeadSource::TrackIR;
+            if (key == "source")
+                s.source = value == "airpods" ? HeadSource::AirPods
+                         : value == "auto"    ? HeadSource::Auto
+                                              : HeadSource::TrackIR;
             else if (key == "profile") s.profile = value;
             else if (key == "smoothing") s.smoothing = std::clamp(std::stod(value), 0.0, 0.95);
             else if (key == "clip_type") s.clipType = value == "pro" ? ClipType::TrackClipPro : ClipType::TrackClip;
@@ -97,6 +100,7 @@ Settings Settings::load(const std::string& path)
                     s.airpodsAxisSign[i] = v[i] < 0 ? -1 : 1;
             }
             else if (key == "airpods_drift") s.airpodsDrift = std::clamp(std::stod(value), 0.0, 10.0);
+            else if (key == "airpods_neck_model") s.airpodsNeckModel = value == "1" || value == "on" || value == "true";
         } catch (...) {
             // keep the default for a malformed value
         }
@@ -121,7 +125,8 @@ bool Settings::save(const std::string& path) const
         for (int i = 0; i < 3; i++)
             airpodsSigns[i] = airpodsAxisSign[size_t(i)];
         f << "# trackir-mac settings (edited by the menu-bar app and `trackir-mac check`)\n"
-          << "source = " << (source == HeadSource::AirPods ? "airpods" : "trackir") << "\n"
+          << "source = "
+          << (source == HeadSource::AirPods ? "airpods" : source == HeadSource::Auto ? "auto" : "trackir") << "\n"
           << "profile = " << profile << "\n"
           << "smoothing = " << smoothing << "\n"
           << "clip_type = " << (clipType == ClipType::TrackClipPro ? "pro" : "clip") << "\n"
@@ -140,7 +145,8 @@ bool Settings::save(const std::string& path) const
           << "hotkey_pause = " << hotkeyPause << "\n"
           << "hotkey_source = " << hotkeySource << "\n"
           << "airpods_axis_sign = " << joinNumbers(airpodsSigns, 3) << "\n"
-          << "airpods_drift = " << airpodsDrift << "\n";
+          << "airpods_drift = " << airpodsDrift << "\n"
+          << "airpods_neck_model = " << (airpodsNeckModel ? 1 : 0) << "\n";
         if (!f)
             return false;
     }

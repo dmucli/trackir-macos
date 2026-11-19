@@ -5,15 +5,18 @@
 #   make npclient   cross-compile the Wine NPClient.dll/NPClient64.dll (needs `brew install mingw-w64`)
 #   make xplane     X-Plane 11/12 plugin (downloads the X-Plane SDK into build/ on first use)
 #   make app        menu-bar app build/TrackIR-macOS.app
+#   make dist       zip files for a release (app, X-Plane plugin, Wine DLLs) in build/dist; for one build that runs
+#                   on Apple Silicon and Intel: make dist BUILD=build/universal ARCHFLAGS="-arch arm64 -arch x86_64"
 
 CXX      ?= clang++
 CC       ?= clang
 BUILD    := build
 MACOS_MIN ?= 12.0
-CPPFLAGS := -Isrc -MMD -MP -mmacosx-version-min=$(MACOS_MIN)
+ARCHFLAGS ?=
+CPPFLAGS := -Isrc -MMD -MP -mmacosx-version-min=$(MACOS_MIN) $(ARCHFLAGS)
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter
 CFLAGS   := -std=c99 -O2 -Wall -Wextra
-LDFLAGS  := -mmacosx-version-min=$(MACOS_MIN)
+LDFLAGS  := -mmacosx-version-min=$(MACOS_MIN) $(ARCHFLAGS)
 OBJCXXFLAGS := $(CXXFLAGS) -fobjc-arc
 # CoreMotion is weak-linked: AirPods head tracking needs macOS 14, the rest of the app runs on macOS 12.
 FRAMEWORKS := -framework Foundation -framework IOKit -framework IOUSBHost -weak_framework CoreMotion
@@ -120,10 +123,18 @@ $(XPTEST)/plugin-test: tests/xplane/plugin_test.cpp $(BUILD)/src/output/np_bridg
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ tests/xplane/plugin_test.cpp $(BUILD)/src/output/np_bridge.o \
 	    $(BUILD)/src/common/np_shared.o -F$(XPTEST) -framework XPLM
 
+# Release archives. ditto keeps the app's code signature intact.
+DIST := $(BUILD)/dist
+dist: app xplane npclient
+	rm -rf $(DIST) && mkdir -p $(DIST)
+	ditto -c -k --keepParent $(APP_BUNDLE) $(DIST)/TrackIR-macOS-app.zip
+	ditto -c -k --keepParent $(BUILD)/xplane/TrackIR-macOS $(DIST)/TrackIR-macOS-xplane-plugin.zip
+	ditto -c -k $(BUILD)/wine $(DIST)/TrackIR-macOS-NPClient-dlls.zip
+
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all test npclient xplane xplane-test app clean
+.PHONY: all test npclient xplane xplane-test app dist clean
 
 -include $(shell find $(BUILD) -name '*.d' 2>/dev/null)
 

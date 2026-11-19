@@ -29,7 +29,7 @@ struct EngineOptions {
 struct EngineStatus {
     // For AirPods: NoCamera = not connected, Connecting = connected but no motion data yet.
     enum class State { Starting, NoCamera, Connecting, Streaming, Failed, Stopped };
-    HeadSource source = HeadSource::TrackIR;
+    HeadSource source = HeadSource::TrackIR;  // the tracker in use (never Auto)
     State state = State::Starting;
     std::string message;          // camera name / error text
     std::string cameraState;      // driver state machine, e.g. "streaming"
@@ -61,7 +61,7 @@ public:
     void setProfile(const Profile& profile);
     void setSmoothing(double alpha);
     void setAxisSigns(const std::array<int, 6>& signs);
-    void setAirPodsTuning(const std::array<int, 3>& signs, double driftDegPerSecond);
+    void setAirPodsTuning(const std::array<int, 3>& signs, double driftDegPerSecond, bool neckModel);
 
     EngineStatus status() const;
 
@@ -76,6 +76,7 @@ public:
 private:
     int runCamera(class NpBridge& bridge, class UdpSender& udp);
     int runAirPods(class NpBridge& bridge, class UdpSender& udp);
+    bool cameraConnected() const;  // a supported TrackIR camera is plugged in
     void setState(EngineStatus::State state, const std::string& message);
 
     EngineOptions options_;
@@ -87,6 +88,7 @@ private:
     std::array<int, 6> axisSign_;
     std::array<int, 3> airpodsSign_;
     double airpodsDrift_;
+    bool airpodsNeck_;
     bool outputChanged_ = false;
 };
 

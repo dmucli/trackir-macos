@@ -32,6 +32,11 @@ struct HeadphoneEuler {
 };
 HeadphoneEuler headphoneEuler(const Quat& q);
 
+// Neck model: the head turns about the neck, not about the eyes, so the eyes move a little whenever the head turns.
+// Adds that movement to x/y/z (centimetres) for a rotation-only tracker: turning left moves the eyes left and back,
+// looking down moves them down and forward. Eyes sit `forwardCm` in front of and `upCm` above the pivot.
+HeadPose withNeckModel(HeadPose pose, double forwardCm = 8, double upCm = 10);
+
 // One drift step: moves the accumulator towards `yaw` by at most rate * dt. Subtracting the result from the raw yaw
 // pulls the output back to the centre at no more than `rate` degrees per second.
 double stepYawDrift(double drift, double yaw, double rate, double dt);

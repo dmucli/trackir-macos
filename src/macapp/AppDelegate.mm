@@ -87,6 +87,7 @@ private:
 
 @interface AppDelegate : NSObject <NSApplicationDelegate, NSMenuDelegate, TrackerController>
 - (void)switchSource:(id)sender;
+- (HeadSource)activeSource;
 @end
 
 @implementation AppDelegate {
@@ -103,6 +104,7 @@ private:
     NSMenuItem* _sourceHeader;
     NSMenuItem* _sourceTrackIR;
     NSMenuItem* _sourceAirPods;
+    NSMenuItem* _sourceAuto;
     NSMenuItem* _trackingItem;
     NSMenuItem* _pauseItem;
     NSMenuItem* _recenterItem;
@@ -224,7 +226,7 @@ static OSStatus onHotKey(EventHandlerCallRef, EventRef event, void* context)
     if (Engine* e = _host.engine()) {
         e->setSmoothing(_settings.smoothing);
         e->setAxisSigns(_settings.axisSign);
-        e->setAirPodsTuning(_settings.airpodsAxisSign, _settings.airpodsDrift);
+        e->setAirPodsTuning(_settings.airpodsAxisSign, _settings.airpodsDrift, _settings.airpodsNeckModel);
     }
     if (restart && _trackingOn) {
         bool paused = _host.engine() && _host.engine()->paused();
@@ -330,7 +332,9 @@ static OSStatus onHotKey(EventHandlerCallRef, EventRef event, void* context)
     _sourceTrackIR.tag = int(HeadSource::TrackIR);
     _sourceAirPods = [self item:@"AirPods" action:@selector(chooseSource:)];
     _sourceAirPods.tag = int(HeadSource::AirPods);
-    for (NSMenuItem* it in @[ _sourceTrackIR, _sourceAirPods ]) {
+    _sourceAuto = [self item:@"Automatic (TrackIR when plugged in)" action:@selector(chooseSource:)];
+    _sourceAuto.tag = int(HeadSource::Auto);
+    for (NSMenuItem* it in @[ _sourceTrackIR, _sourceAirPods, _sourceAuto ]) {
         it.indentationLevel = 1;
         [menu addItem:it];
     }
@@ -375,12 +379,17 @@ static OSStatus onHotKey(EventHandlerCallRef, EventRef event, void* context)
 - (void)updateMenuState
 {
     _trackingItem.state = _trackingOn ? NSControlStateValueOn : NSControlStateValueOff;
-    bool airpods = _settings.source == HeadSource::AirPods;
-    _sourceTrackIR.state = airpods ? NSControlStateValueOff : NSControlStateValueOn;
-    _sourceAirPods.state = airpods ? NSControlStateValueOn : NSControlStateValueOff;
+    HeadSource source = _settings.source;
+    _sourceTrackIR.state = source == HeadSource::TrackIR ? NSControlStateValueOn : NSControlStateValueOff;
+    _sourceAirPods.state = source == HeadSource::AirPods ? NSControlStateValueOn : NSControlStateValueOff;
+    _sourceAuto.state = source == HeadSource::Auto ? NSControlStateValueOn : NSControlStateValueOff;
+    NSString* title = @"Head tracker";
+    if (source == HeadSource::Auto && _trackingOn)
+        title = [self activeSource] == HeadSource::AirPods ? @"Head tracker: using AirPods"
+                                                           : @"Head tracker: using TrackIR";
     NSString* key = [self hotkeySuffix:_settings.hotkeySource];
-    _sourceHeader.title = key.length ? [NSString stringWithFormat:@"Head tracker   (switch: %@)", ns(_settings.hotkeySource)]
-                                     : @"Head tracker";
+    _sourceHeader.title = key.length ? [NSString stringWithFormat:@"%@   (switch: %@)", title, ns(_settings.hotkeySource)]
+                                     : title;
     Engine* e = _host.engine();
     _pauseItem.state = e && e->paused() ? NSControlStateValueOn : NSControlStateValueOff;
     _pauseItem.enabled = e != nullptr;
@@ -507,10 +516,18 @@ static OSStatus onHotKey(EventHandlerCallRef, EventRef event, void* context)
     [_settingsWindow reload];
 }
 
-// Hotkey: TrackIR <-> AirPods.
+// The tracker in use; with Automatic, whichever one the engine picked.
+- (HeadSource)activeSource
+{
+    if (_settings.source != HeadSource::Auto)
+        return _settings.source;
+    return [self currentStatus].source;
+}
+
+// Hotkey: switch to the other tracker (this leaves Automatic).
 - (void)switchSource:(id)sender
 {
-    NSMenuItem* target = _settings.source == HeadSource::AirPods ? _sourceTrackIR : _sourceAirPods;
+    NSMenuItem* target = [self activeSource] == HeadSource::AirPods ? _sourceTrackIR : _sourceAirPods;
     [self chooseSource:target];
 }
 

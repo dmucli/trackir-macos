@@ -36,9 +36,10 @@ Engine::Engine(EngineOptions options)
       smoothing_(options_.settings.smoothing),
       axisSign_(options_.settings.axisSign),
       airpodsSign_(options_.settings.airpodsAxisSign),
-      airpodsDrift_(options_.settings.airpodsDrift)
+      airpodsDrift_(options_.settings.airpodsDrift),
+      airpodsNeck_(options_.settings.airpodsNeckModel)
 {
-    status_.source = options_.settings.source;
+    status_.source = options_.settings.source == HeadSource::AirPods ? HeadSource::AirPods : HeadSource::TrackIR;
 }
 
 Engine::~Engine() = default;
@@ -77,11 +78,12 @@ void Engine::setAxisSigns(const std::array<int, 6>& signs)
     outputChanged_ = true;
 }
 
-void Engine::setAirPodsTuning(const std::array<int, 3>& signs, double driftDegPerSecond)
+void Engine::setAirPodsTuning(const std::array<int, 3>& signs, double driftDegPerSecond, bool neckModel)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     airpodsSign_ = signs;
     airpodsDrift_ = driftDegPerSecond;
+    airpodsNeck_ = neckModel;
     outputChanged_ = true;
 }
 
@@ -135,7 +137,8 @@ int Engine::run()
     while (!stop_) {
         if (Clock::now() - lastAttempt >= std::chrono::seconds(1)) {
             lastAttempt = Clock::now();
-            result = s.source == HeadSource::AirPods ? runAirPods(bridge, udp) : runCamera(bridge, udp);
+            bool airpods = s.source == HeadSource::AirPods || (s.source == HeadSource::Auto && !cameraConnected());
+            result = airpods ? runAirPods(bridge, udp) : runCamera(bridge, udp);
             if (!options_.waitForCamera || stop_)
                 break;
         }
@@ -149,9 +152,23 @@ int Engine::run()
     return stop_ ? 0 : result;
 }
 
+bool Engine::cameraConnected() const
+{
+    for (const auto& d : UsbLink::enumerate()) {
+        const CameraModel* m = findCameraModel(d.productId);
+        if (m && m->supported && (!options_.productId || options_.productId == d.productId))
+            return true;
+    }
+    return false;
+}
+
 int Engine::runCamera(NpBridge& bridge, UdpSender& udp)
 {
     const Settings& s = options_.settings;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        status_.source = HeadSource::TrackIR;
+    }
     auto devices = UsbLink::enumerate();
     const UsbDeviceInfo* chosen = nullptr;
     for (const auto& d : devices) {
@@ -348,6 +365,23 @@ int Engine::runAirPods(NpBridge& bridge, UdpSender& udp)
         setState(state, message);
     };
 
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        status_.source = HeadSource::AirPods;
+    }
+    // Automatic: hand over to the camera as soon as one is plugged in (checked every 2 s).
+    const bool automatic = options_.settings.source == HeadSource::Auto;
+    auto lastCameraCheck = Clock::now();
+    auto cameraArrived = [&] {
+        if (!automatic || Clock::now() - lastCameraCheck < std::chrono::seconds(2))
+            return false;
+        lastCameraCheck = Clock::now();
+        if (!cameraConnected())
+            return false;
+        log("TrackIR camera plugged in: switching from AirPods to the camera");
+        return true;
+    };
+
     auto idle = [&] {
         bridge.pollCommands();
         bridge.heartbeat();
@@ -356,8 +390,11 @@ int Engine::runAirPods(NpBridge& bridge, UdpSender& udp)
     };
     if (!HeadphoneMotion::supported()) {
         show(State::Failed, "AirPods head tracking needs macOS 14 or later");
-        while (options_.waitForCamera && !stop_)
+        while (options_.waitForCamera && !stop_) {
+            if (cameraArrived())
+                return 0;
             idle();
+        }
         return 1;
     }
 
@@ -369,12 +406,14 @@ int Engine::runAirPods(NpBridge& bridge, UdpSender& udp)
     Profile profile;
     PoseFilter filter;
     std::array<int, 6> signs{};
+    bool neck = false;
     auto reloadOutput = [&] {
         std::lock_guard<std::mutex> lock(mutex_);
         profile = profile_;
         filter.setSmoothing(smoothing_);
         signs = {airpodsSign_[0], airpodsSign_[1], airpodsSign_[2], 1, 1, 1};
         tracker.setDriftRate(airpodsDrift_);
+        neck = airpodsNeck_;
         outputChanged_ = false;
     };
     reloadOutput();
@@ -413,7 +452,10 @@ int Engine::runAirPods(NpBridge& bridge, UdpSender& udp)
 
         for (const auto& sample : samples) {
             double t = std::chrono::duration<double>(sample.time.time_since_epoch()).count();
-            measured = tracker.update(sample.attitude, t);
+            // After the Invert boxes, so the neck model, the Live View and the curve editor use the corrected angles.
+            measured = withSigns(tracker.update(sample.attitude, t), signs);
+            if (neck)
+                measured = withNeckModel(measured);
             haveSample = true;
             lastSample = now;
             count++;
@@ -426,7 +468,7 @@ int Engine::runAirPods(NpBridge& bridge, UdpSender& udp)
         if (stepped) {
             lastFiltered = now;
             if (live)
-                out = profile.apply(filter.step(withSigns(measured, signs), dt));
+                out = profile.apply(filter.step(measured, dt));
         }
         bool paused = paused_;
         if (paused && !wasPaused)
@@ -468,14 +510,15 @@ int Engine::runAirPods(NpBridge& bridge, UdpSender& udp)
             result = 1;
             break;
         }
+        if (cameraArrived())
+            break;
 
         {
             std::lock_guard<std::mutex> lock(mutex_);
             status_.clipVisible = live;
             status_.distanceCm = 0;
             if (!samples.empty()) {
-                // After the Invert boxes, so the Live View and the curve editor show the direction the game gets.
-                status_.measured = withSigns(measured, signs);
+                status_.measured = measured;
                 status_.poseCounter++;
             }
             status_.output = published;

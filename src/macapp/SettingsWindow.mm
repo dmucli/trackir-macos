@@ -226,6 +226,7 @@ static NSString* ns(const std::string& s)
     // AirPods
     NSPopUpButton* _source;
     NSButton* _apInvert[3];
+    NSButton* _apNeck;
     NSSlider* _apDrift;
     NSTextField* _apDriftValue;
 }
@@ -262,7 +263,7 @@ static NSView* padded(NSView* content)
 
 - (instancetype)initWithController:(id<TrackerController>)controller
 {
-    NSWindow* w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 640, 520)
+    NSWindow* w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 640, 600)
                                               styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
                                                 backing:NSBackingStoreBuffered
                                                   defer:NO];
@@ -272,7 +273,7 @@ static NSView* padded(NSView* content)
         return nil;
     _controller = controller;
 
-    NSTabView* tabs = [[NSTabView alloc] initWithFrame:NSMakeRect(0, 0, 640, 520)];
+    NSTabView* tabs = [[NSTabView alloc] initWithFrame:NSMakeRect(0, 0, 640, 600)];
     NSTabViewItem* general = [[NSTabViewItem alloc] initWithIdentifier:@"general"];
     general.label = @"Camera";
     general.view = [self buildGeneral];
@@ -336,12 +337,13 @@ static NSView* padded(NSView* content)
 - (NSView*)buildAirPods
 {
     _source = [[NSPopUpButton alloc] init];
-    [_source addItemsWithTitles:@[ @"TrackIR 5 camera", @"AirPods" ]];
+    [_source addItemsWithTitles:@[ @"TrackIR 5 camera", @"AirPods", @"Automatic: TrackIR when plugged in, else AirPods" ]];
     _source.target = self;
     _source.action = @selector(changed:);
     NSString* const names[3] = {@"Invert yaw (turn)", @"Invert pitch (nod)", @"Invert roll (tilt)"};
     for (int i = 0; i < 3; i++)
         _apInvert[i] = [NSButton checkboxWithTitle:names[i] target:self action:@selector(changed:)];
+    _apNeck = [NSButton checkboxWithTitle:@"Neck model" target:self action:@selector(changed:)];
     _apDrift = [NSSlider sliderWithValue:0 minValue:0 maxValue:3 target:self action:@selector(changed:)];
     [_apDrift.widthAnchor constraintEqualToConstant:260].active = YES;
     _apDriftValue = [NSTextField labelWithString:@""];
@@ -354,7 +356,11 @@ static NSView* padded(NSView* content)
         @[ label(@"Directions:"), [NSStackView stackViewWithViews:@[ _apInvert[0], _apInvert[1], _apInvert[2] ]] ],
         @[ [NSGridCell emptyContentView],
            note(@"Tick one if that axis moves the wrong way (watch the Live View). AirPods measure rotation only: "
-                @"leaning and sliding (X, Y, Z) stay at zero.") ],
+                @"you cannot lean or slide with them.") ],
+        @[ label(@"Movement:"), _apNeck ],
+        @[ [NSGridCell emptyContentView],
+           note(@"Your head turns about your neck, so your eyes move a few centimetres when you look around or "
+                @"down. This adds that small movement to X, Y and Z. It is not real leaning.") ],
         @[ label(@"Yaw drift correction:"), [NSStackView stackViewWithViews:@[ _apDrift, _apDriftValue ]] ],
         @[ [NSGridCell emptyContentView],
            note(@"AirPods slowly drift in yaw over a long session. This pulls the view back to the centre by at "
@@ -455,7 +461,8 @@ static NSView* padded(NSView* content)
     [_keySource selectItemWithTitle:ns(s.hotkeySource)];
     if (!_keySource.selectedItem)
         [_keySource selectItemAtIndex:0];
-    [_source selectItemAtIndex:s.source == HeadSource::AirPods ? 1 : 0];
+    [_source selectItemAtIndex:s.source == HeadSource::Auto ? 2 : s.source == HeadSource::AirPods ? 1 : 0];
+    _apNeck.state = s.airpodsNeckModel ? NSControlStateValueOn : NSControlStateValueOff;
     for (int i = 0; i < 3; i++)
         _apInvert[i].state = s.airpodsAxisSign[size_t(i)] < 0 ? NSControlStateValueOn : NSControlStateValueOff;
     _apDrift.doubleValue = s.airpodsDrift;
@@ -562,7 +569,9 @@ static NSView* padded(NSView* content)
     s.hotkeyRecenter = _keyRecenter.titleOfSelectedItem.UTF8String ?: "none";
     s.hotkeyPause = _keyPause.titleOfSelectedItem.UTF8String ?: "none";
     s.hotkeySource = _keySource.titleOfSelectedItem.UTF8String ?: "none";
-    s.source = _source.indexOfSelectedItem == 1 ? HeadSource::AirPods : HeadSource::TrackIR;
+    NSInteger source = _source.indexOfSelectedItem;
+    s.source = source == 2 ? HeadSource::Auto : source == 1 ? HeadSource::AirPods : HeadSource::TrackIR;
+    s.airpodsNeckModel = _apNeck.state == NSControlStateValueOn;
     for (int i = 0; i < 3; i++)
         s.airpodsAxisSign[size_t(i)] = _apInvert[i].state == NSControlStateValueOn ? -1 : 1;
     double drift = std::round(_apDrift.doubleValue * 10) / 10;
